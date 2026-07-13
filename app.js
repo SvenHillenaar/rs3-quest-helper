@@ -10,7 +10,7 @@
 
 	var WIKI_API = "https://runescape.wiki/api.php";
 	var INDEX_CACHE_KEY = "rs3qh-index-v1";
-	var GUIDE_CACHE_KEY = "rs3qh-guides-v3";
+	var GUIDE_CACHE_KEY = "rs3qh-guides-v4";
 	var PROGRESS_KEY = "rs3qh-progress-v2";
 	var INDEX_TTL_MS = 7 * 24 * 3600 * 1000;
 	var GUIDE_TTL_MS = 7 * 24 * 3600 * 1000;
@@ -277,6 +277,8 @@
 	var MAP_CLOSE = "]M@@";
 	var ITEM_OPEN = "@@I[";
 	var ITEM_CLOSE = "]I@@";
+	var IMG_OPEN = "@@P[";
+	var IMG_CLOSE = "]P@@";
 	var NEEDED_MARK = "@@NEEDED@@";
 
 	// Split template params on top-level pipes (ignoring pipes nested in
@@ -368,7 +370,22 @@
 			.replace(/<ref[^>]*>[\s\S]*?<\/ref>/gi, "")
 			.replace(/<br\s*\/?>/gi, " ")
 			.replace(/<[^>]+>/g, "")
-			.replace(/\[\[(?:File|Image|Category):[^\[\]]*(?:\[\[[^\]]*\]\][^\[\]]*)*\]\]/gi, "")
+			.replace(/\[\[(?:File|Image):([^\[\]]*(?:\[\[[^\]]*\]\][^\[\]]*)*)\]\]/gi, function (_, inner) {
+				// Keep guide images (puzzle solutions etc.) as sentinels; the
+				// last non-formatting parameter is the caption.
+				var parts = splitParams(inner);
+				var name = parts.shift().trim();
+				if (!/\.(png|jpe?g|gif|webp)$/i.test(name)) return "";
+				var caption = "";
+				parts.forEach(function (p) {
+					p = p.trim();
+					if (!p) return;
+					if (/^(thumb|thumbnail|frame|frameless|border|right|left|center|none|baseline|sub|super|top|text-top|middle|bottom|text-bottom|upright[\s\S]*|x?\d+(x\d+)?px|link=[\s\S]*|alt=[\s\S]*|page=[\s\S]*|class=[\s\S]*|lang=[\s\S]*)$/i.test(p)) return;
+					caption = p;
+				});
+				return IMG_OPEN + name + "|" + caption + IMG_CLOSE;
+			})
+			.replace(/\[\[Category:[^\]]*\]\]/gi, "")
 			.replace(/\[\[[^\]|]*\|([^\]]*)\]\]/g, "$1")
 			.replace(/\[\[([^\]]*)\]\]/g, "$1")
 			.replace(/\[https?:\/\/[^\s\]]+ ([^\]]*)\]/g, "$1")
@@ -407,11 +424,23 @@
 			if (iname) items.push(iname);
 			text = text.slice(0, start) + text.slice(iend + ITEM_CLOSE.length);
 		}
+		var images = [];
+		while ((start = text.indexOf(IMG_OPEN)) !== -1) {
+			var pend = text.indexOf(IMG_CLOSE, start);
+			if (pend === -1) { text = text.replace(IMG_OPEN, ""); continue; }
+			var body = text.slice(start + IMG_OPEN.length, pend);
+			var sep = body.indexOf("|");
+			var file = (sep === -1 ? body : body.slice(0, sep)).trim();
+			var caption = sep === -1 ? "" : body.slice(sep + 1).replace(/\s+/g, " ").trim();
+			if (file) images.push({ file: file, caption: caption });
+			text = text.slice(0, start) + text.slice(pend + IMG_CLOSE.length);
+		}
 		return {
 			text: text.replace(/\s+/g, " ").trim(),
 			chat: chat.join(" / ") || null,
 			maps: maps,
-			items: items
+			items: items,
+			images: images
 		};
 	}
 
@@ -465,7 +494,7 @@
 		}
 
 		function newSection(title) {
-			current = { title: title, needed: [], steps: [] };
+			current = { title: title, needed: [], steps: [], images: [] };
 			sections.push(current);
 		}
 
@@ -510,6 +539,7 @@
 				if (neededLine.items.length) {
 					current.items = (current.items || []).concat(neededLine.items);
 				}
+				if (neededLine.images.length) current.images = current.images.concat(neededLine.images);
 				return;
 			}
 
@@ -517,30 +547,37 @@
 			if (b) {
 				var depth = b[1].length;
 				var parsedLine = extractChat(b[2]);
-				if (!parsedLine.text && !parsedLine.chat) return;
+				if (!parsedLine.text && !parsedLine.chat && !parsedLine.images.length) return;
 				if (depth === 1 || !lastStep()) {
-					current.steps.push({ text: parsedLine.text, chat: parsedLine.chat, maps: parsedLine.maps, sub: [] });
+					current.steps.push({ text: parsedLine.text, chat: parsedLine.chat, maps: parsedLine.maps, images: parsedLine.images, sub: [] });
 				} else {
 					lastStep().sub.push({ text: parsedLine.text, chat: parsedLine.chat, maps: parsedLine.maps });
+					if (parsedLine.images.length) {
+						lastStep().images = (lastStep().images || []).concat(parsedLine.images);
+					}
 				}
 				return;
 			}
 
 			// Loose prose inside a section: attach as a note to the last
-			// step, or keep as a section-level info line.
+			// step, or keep as a section-level info line. Images on their
+			// own line (the common wiki pattern) belong to the section when
+			// no steps exist yet, otherwise to the latest step.
 			var prose = extractChat(trimmed);
-			if (!prose.text) return;
+			if (!prose.text && !prose.images.length) return;
 			var stepHost = lastStep();
 			if (stepHost) {
-				stepHost.note = (stepHost.note ? stepHost.note + " " : "") + prose.text;
+				if (prose.text) stepHost.note = (stepHost.note ? stepHost.note + " " : "") + prose.text;
 				if (prose.maps.length) stepHost.maps = (stepHost.maps || []).concat(prose.maps);
+				if (prose.images.length) stepHost.images = (stepHost.images || []).concat(prose.images);
 			} else {
-				current.needed.push(prose.text);
+				if (prose.text) current.needed.push(prose.text);
+				if (prose.images.length) current.images = current.images.concat(prose.images);
 			}
 		});
 
 		// Drop sections that ended up with no steps and no info.
-		sections = sections.filter(function (s) { return s.steps.length || s.needed.length; });
+		sections = sections.filter(function (s) { return s.steps.length || s.needed.length || s.images.length; });
 		return { sections: sections };
 	}
 
@@ -1052,6 +1089,29 @@
 		return a;
 	}
 
+	function wikiImageUrl(file, width) {
+		return "https://runescape.wiki/w/Special:FilePath/" +
+			encodeURIComponent(file.replace(/ /g, "_")) + (width ? "?width=" + width : "");
+	}
+
+	// Guide image (puzzle solutions etc.): thumbnail, click to enlarge.
+	function guideImage(im) {
+		var fig = el("figure", "guide-img");
+		var img = document.createElement("img");
+		img.src = wikiImageUrl(im.file, 320);
+		img.loading = "lazy";
+		img.alt = im.caption || im.file;
+		img.title = "Click to enlarge";
+		img.addEventListener("click", function (e) {
+			e.stopPropagation();
+			var big = fig.classList.toggle("expanded");
+			img.src = wikiImageUrl(im.file, big ? 1000 : 320);
+		});
+		fig.appendChild(img);
+		if (im.caption) fig.appendChild(el("figcaption", null, im.caption));
+		return fig;
+	}
+
 	function showMapPanel(m) {
 		var url = mapUrl(m);
 		document.getElementById("map-frame").src = url;
@@ -1179,6 +1239,9 @@
 			section.needed.forEach(function (n) {
 				main.appendChild(el("div", "section-needed", n));
 			});
+			(section.images || []).forEach(function (im) {
+				main.appendChild(guideImage(im));
+			});
 
 			section.steps.forEach(function (stepData, ti) {
 				var step = flatSteps.find(function (s) { return s.sectionIndex === si && s.stepIndex === ti; });
@@ -1197,6 +1260,7 @@
 				if (stepData.chat) body.appendChild(el("span", "chip", "Chat: " + stepData.chat));
 				(stepData.maps || []).forEach(function (m) { body.appendChild(mapChip(m)); });
 				if (stepData.note) body.appendChild(el("span", "step-note", stepData.note));
+				(stepData.images || []).forEach(function (im) { body.appendChild(guideImage(im)); });
 				if (stepData.sub && stepData.sub.length) {
 					var ul = el("ul", "sub-list");
 					stepData.sub.forEach(function (item, k) {

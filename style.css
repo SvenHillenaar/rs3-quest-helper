@@ -351,6 +351,28 @@ main {
 
 .chip-map:hover { border-color: var(--gold); }
 
+.guide-img {
+	margin: 6px 2px;
+}
+
+.guide-img img {
+	display: block;
+	max-width: 100%;
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	cursor: zoom-in;
+	background: #111;
+}
+
+.guide-img.expanded img { cursor: zoom-out; }
+
+.guide-img figcaption {
+	font-size: 11px;
+	color: var(--muted);
+	margin-top: 2px;
+	font-style: italic;
+}
+
 .step-note {
 	display: block;
 	font-size: 11px;

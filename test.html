@@ -186,6 +186,19 @@
 		check("parser: needed text readable",
 			g2.sections[0].needed[0].indexOf("6 bolts of cloth") !== -1);
 
+		// Guide images: section-level (before steps) and step-level.
+		var g3 = window.__rs3qh.parseQuickGuide(
+			"==Aggie==\n" +
+			"[[File:Pattern triangles.png|thumb|right|One possible solution for [[Aggie]]'s puzzle]]\n" +
+			"{{Checklist|\n* Talk to [[Aggie]] in Draynor Village.\n* Solve it. [[File:Other.png|thumb|120px|Step pic]]\n}}\n"
+		);
+		var s3 = g3.sections[0];
+		check("parser: section image captured", s3.images.length === 1 && s3.images[0].file === "Pattern triangles.png");
+		check("parser: image caption cleaned", s3.images[0].caption === "One possible solution for Aggie's puzzle");
+		check("parser: step image captured", s3.steps[1].images.length === 1 && s3.steps[1].images[0].file === "Other.png");
+		check("parser: size param not caption", s3.steps[1].images[0].caption === "Step pic");
+		check("parser: image steps unaffected", s3.steps.length === 2 && s3.steps[0].text.indexOf("Talk to Aggie") === 0);
+
 		document.getElementById("results").textContent =
 			out.join("\n") + "\n\n" + (failures ? failures + " FAILED" : "ALL TESTS PASSED");
 	})();
