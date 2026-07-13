@@ -608,6 +608,47 @@
 		return { sections: sections };
 	}
 
+	// Extract the {{Quest details}} items/recommended lists from a quest's
+	// main page — these carry the "obtainable during the quest" style
+	// annotations that quick guides leave out.
+	function parseQuestDetails(wikitext) {
+		var idx = wikitext.search(/\{\{Quest details/i);
+		if (idx === -1) return { items: [], recommended: [] };
+		var depth = 0, end = -1;
+		for (var i = idx; i < wikitext.length - 1; i++) {
+			var two = wikitext.substr(i, 2);
+			if (two === "{{") { depth++; i++; }
+			else if (two === "}}") { depth--; i++; if (!depth) { end = i + 1; break; } }
+		}
+		if (end === -1) return { items: [], recommended: [] };
+		var parts = splitParams(wikitext.slice(idx + 2, end - 2));
+		function listOf(key) {
+			var v = namedParam(parts, key);
+			if (!v || /^(none|no)\.?$/i.test(v.trim())) return [];
+			return cleanMarkup(resolveTemplates(v)).split("\n").map(function (l) {
+				return extractChat(l.replace(/^\s*[*#:]+\s*/, "")).text;
+			}).filter(Boolean);
+		}
+		return { items: listOf("items"), recommended: listOf("recommended") };
+	}
+
+	function attachQuestDetails(cb) {
+		if (guide.details) { cb(); return; }
+		wikiGet({ action: "parse", page: guide.name, prop: "wikitext" }, function (data) {
+			var wt = data.parse && data.parse.wikitext ? data.parse.wikitext["*"] : "";
+			guide.details = parseQuestDetails(wt);
+			var cache = load(GUIDE_CACHE_KEY, {});
+			if (cache[guide.title]) {
+				cache[guide.title].data = guide;
+				store(GUIDE_CACHE_KEY, cache);
+			}
+			cb();
+		}, function () {
+			// Non-fatal: the panel just shows the quick-guide info alone.
+			cb();
+		});
+	}
+
 	// ---------- alt1 integration ----------
 
 	function inAlt1() {
@@ -1408,6 +1449,25 @@
 
 	// ---------- navigation ----------
 
+	function renderQuestDetails() {
+		var d = (guide && guide.details) || { items: [], recommended: [] };
+		var itemsUl = document.getElementById("details-items");
+		var recUl = document.getElementById("details-rec");
+		itemsUl.innerHTML = "";
+		recUl.innerHTML = "";
+		d.items.forEach(function (l) {
+			var li = el("li", null, l);
+			// Surface the key annotation the quick guide leaves out.
+			if (/obtain(ed|able)?\s+(during|in)\s+the\s+quest/i.test(l)) li.className = "obtainable";
+			itemsUl.appendChild(li);
+		});
+		d.recommended.forEach(function (l) { recUl.appendChild(el("li", null, l)); });
+		show("details-items-head", d.items.length > 0);
+		show("details-rec-head", d.recommended.length > 0);
+		show("details-req", d.items.length > 0 || d.recommended.length > 0);
+		if (d.items.length || d.recommended.length) show("items-panel", true);
+	}
+
 	function openQuest(title) {
 		show("view-home", false);
 		show("view-guide", true);
@@ -1434,6 +1494,8 @@
 			setStatus("guide-status", flatSteps.length ? "" : "This guide has no parseable steps — use the wiki link above.");
 			renderMeta();
 			renderSteps();
+			show("details-req", false);
+			attachQuestDetails(renderQuestDetails);
 			if (overlayTimer) paintOverlay();
 		}, function (msg) {
 			setStatus("guide-status", msg);
@@ -1644,6 +1706,7 @@
 		convoTrack: convoTrack,
 		normName: normName,
 		parseRmPayload: parseRmPayload,
+		parseQuestDetails: parseQuestDetails,
 		fetchRuneMetrics: fetchRuneMetrics,
 		setAuto: function (v) { autoAdvance = v; }
 	};
