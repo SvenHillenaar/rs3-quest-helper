@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<title>RS3 Quest Helper — self tests</title>
+	<link rel="stylesheet" href="style.css">
+</head>
+<body>
+	<!-- Minimal DOM so app.js can initialise -->
+	<div id="alt1-banner" class="banner hidden"><a id="addtoalt1" href="#"></a></div>
+	<div id="view-home" class="view hidden">
+		<input id="search" type="search">
+		<div id="index-status" class="hidden"></div>
+		<main id="quest-list"></main>
+	</div>
+	<div id="view-guide" class="view hidden">
+		<button id="btn-home"></button>
+		<div id="guide-title"></div>
+		<div id="progress-fill"></div><span id="progress-label"></span>
+		<div id="quest-info"></div>
+		<details id="items-panel" class="hidden"><ul id="items-list"></ul></details>
+		<div id="guide-status" class="hidden"></div>
+		<main id="steps"></main>
+		<div id="assist-status" class="hidden"></div>
+		<button id="btn-back"></button><button id="btn-next"></button>
+		<button id="btn-overlay"></button><button id="btn-assist"></button><button id="btn-reset"></button>
+	</div>
+
+	<pre id="results">running…</pre>
+
+	<script src="libs/a1lib.js"></script>
+	<script src="libs/ocr.js"></script>
+	<script src="libs/dialog.js"></script>
+	<script src="libs/chatbox.js"></script>
+	<script src="app.js"></script>
+	<script>
+	(function () {
+		var out = [];
+		var failures = 0;
+		function check(name, cond) {
+			out.push((cond ? "PASS" : "FAIL") + " " + name);
+			if (!cond) failures++;
+		}
+		function names(arr) { return arr.map(function (o) { return o.text; }).join(","); }
+
+		// Libraries loaded and expose the expected globals?
+		check("A1lib global", typeof A1lib !== "undefined" && !!A1lib.captureHoldFullRs);
+		check("OCR global", typeof OCR !== "undefined" && !!OCR.readLine);
+		check("Dialog global", typeof Dialog !== "undefined" && !!Dialog.default);
+		check("Chatbox global", typeof Chatbox !== "undefined" && !!Chatbox.default);
+		check("Dialog instantiates", (function () {
+			try { return !!new Dialog.default().read; } catch (e) { return false; }
+		})());
+		check("Chatbox instantiates", (function () {
+			try { return !!new Chatbox.default().find; } catch (e) { return false; }
+		})());
+
+		// Option matcher.
+		var m = window.__rs3qh.matchOptions;
+		var opts = [
+			{ text: "Talk about A Christmas Reunion." },
+			{ text: "Can you sell me a rune platebody?" },
+			{ text: "Nevermind." }
+		];
+		var r;
+
+		r = m("1 Talk about 'A Christmas Reunion'.", opts);
+		check("text match beats numbering", r.length === 1 && r[0] === opts[0]);
+
+		r = m("2", opts);
+		check("bare number picks 2nd option", r.length === 1 && r[0] === opts[1]);
+
+		r = m("Any", opts);
+		check("Any picks all", r.length === 3);
+
+		r = m("1 Talk about 'A Christmas Reunion'. / Any", opts);
+		check("specific match wins over Any", r.length === 1 && r[0] === opts[0]);
+
+		// Text candidates that don't match this screen must stay silent —
+		// they belong to another screen in the conversation chain.
+		r = m("1 Buy some swords.", [{ text: "Completely different" }, { text: "Other" }]);
+		check("no number fallback for text candidates (" + names(r) + ")", r.length === 0);
+
+		r = m("1 Buy some swords. / Any", [{ text: "Completely different" }, { text: "Other" }]);
+		check("Any still applies when nothing matches", r.length === 2);
+
+		r = m("1 No, she liked the ring. / 2 What are we going to do?",
+			[{ text: "It's come out perfectly." }, { text: "How does this look?" }, { text: "It's a complete disaster." }]);
+		check("chained candidates on wrong screen -> no boxes (" + names(r) + ")", r.length === 0);
+
+		r = m("Accept", [{ text: "Accept the quest." }, { text: "Decline." }]);
+		check("substring match", r.length === 1 && r[0].text === "Accept the quest.");
+
+		r = m("9 Nope", [{ text: "One" }]);
+		check("out-of-range number, no text match -> empty (" + names(r) + ")", r.length === 0);
+
+		// OCR dropped a word: 4 of 5 meaningful words still present.
+		r = m("1 Your daughter seeks permission to court an outlander.",
+			[{ text: "Your daughter seeks permission to court an outlandr" }, { text: "No." }]);
+		check("fuzzy word-overlap survives OCR errors", r.length === 1 && r[0].text.indexOf("daughter") !== -1);
+
+		r = m("1 I'm sure that's not true.", [{ text: "I'm sure thats not true." }, { text: "Other." }]);
+		check("punctuation-insensitive match", r.length === 1);
+
+		// OCR text normalisation is case/punct insensitive.
+		r = m("1 TALK ABOUT a christmas reunion", opts);
+		check("case insensitive", r.length === 1 && r[0] === opts[0]);
+
+		// Conversation tracker (auto-tick heuristic).
+		var ct = window.__rs3qh.convoTrack;
+		var advanced;
+		// no dialog ever -> never advances
+		advanced = false;
+		for (var i = 0; i < 10; i++) { if (ct("s1", false)) advanced = true; }
+		check("convo: no dialog, no advance", !advanced);
+		// dialog appears 3 ticks, disappears -> advances on 3rd gone tick
+		ct("s2", true); ct("s2", true); ct("s2", true);
+		check("convo: gone 1", ct("s2", false) === false);
+		check("convo: gone 2", ct("s2", false) === false);
+		check("convo: gone 3 advances", ct("s2", false) === true);
+		check("convo: does not re-advance", ct("s2", false) === false);
+		// dialog blips for one tick only -> no advance (needs seen >= 2)
+		ct("s3", true);
+		advanced = false;
+		for (var i = 0; i < 5; i++) { if (ct("s3", false)) advanced = true; }
+		check("convo: single blip, no advance", !advanced);
+		// step change resets the tracker
+		ct("s4", true); ct("s4", true);
+		ct("s5", false); ct("s5", false);
+		check("convo: step change resets", ct("s5", false) === false);
+		// dialog reappearing resets the gone counter
+		ct("s6", true); ct("s6", true);
+		ct("s6", false); ct("s6", false);
+		ct("s6", true);
+		check("convo: reappear resets gone", ct("s6", false) === false && ct("s6", false) === false);
+
+		// Quest-name normalisation (RuneMetrics <-> wiki title matching).
+		var nn = window.__rs3qh.normName;
+		check("norm: miniquest suffix", nn("Doric's Task I (miniquest)") === nn("Doric's Task I"));
+		check("norm: punctuation", nn("Another Slice of H.A.M.") === nn("Another Slice of HAM"));
+		check("norm: ampersand", nn("Heroes & Villains") === nn("Heroes and Villains"));
+		check("norm: case/spaces", nn("The  Blood Pact") === nn("the blood pact"));
+		check("norm: distinct quests stay distinct", nn("A Fairy Tale I - Growing Pains") !== nn("A Fairy Tale II - Cure a Queen"));
+
+		// RuneMetrics payload parsing (fetch and manual import share this).
+		var rm = window.__rs3qh.parseRmPayload;
+		var st = rm('{"quests":[{"title":"Cook\'s Assistant","status":"COMPLETED"},{"title":"Dragon Slayer","status":"STARTED"}]}');
+		check("rm: parses statuses", !!st && st[nn("Cook's Assistant")] === "COMPLETED" && st[nn("Dragon Slayer")] === "STARTED");
+		check("rm: rejects html", rm("<html>error page</html>") === null);
+		check("rm: rejects empty quests", rm('{"quests":[]}') === null);
+		check("rm: rejects other json", rm('{"error":"NO_PROFILE"}') === null);
+		var wrapped = rm('Title: quests\nURL: x\n\n{"quests":[{"title":"Demon Slayer","status":"COMPLETED"}]} trailing');
+		check("rm: unwraps proxy-wrapped payload", !!wrapped && wrapped[nn("Demon Slayer")] === "COMPLETED");
+
+		// Live end-to-end: fetch real statuses through the fallback chain.
+		window.__rs3qh.fetchRuneMetrics("Kiddsh_GIM", true, function (statuses) {
+			var n = Object.keys(statuses).length;
+			document.getElementById("results").textContent +=
+				"\nLIVE rm sync OK: " + n + " quests" + (statuses[nn("Cook's Assistant")] === "COMPLETED" ? " (Cook's Assistant COMPLETED)" : "");
+		}, function (msg) {
+			document.getElementById("results").textContent += "\nLIVE rm sync FAILED: " + msg;
+		});
+
+		// Parser smoke test on a synthetic quick guide.
+		var g = window.__rs3qh.parseQuickGuide(
+			"==Overview==\n{{Quest details page|X}}\n" +
+			"==Doing things==\n{{Needed|a [[hammer]], 2 [[nail]]s}}\n" +
+			"{{Checklist|\n* Talk to [[Bob]]. {{Chat options|1 Hello.|Any}}\n* Go north.\n** Climb the ladder.\n}}\n" +
+			"==Rewards==\n{{Quest rewards page|X}}\n"
+		);
+		check("parser: one section", g.sections.length === 1);
+		check("parser: needed items", g.sections[0].needed[0] === "a hammer, 2 nails");
+		check("parser: two steps", g.sections[0].steps.length === 2);
+		check("parser: chat extracted", g.sections[0].steps[0].chat === "1 Hello. / Any");
+		check("parser: sub step", g.sections[0].steps[1].sub.length === 1);
+		check("parser: item names from Needed links",
+			g.sections[0].items && g.sections[0].items.length === 2 &&
+			g.sections[0].items[0] === "hammer" && g.sections[0].items[1] === "nail");
+
+		// Piped/anchored links and duplicates in Needed lines.
+		var g2 = window.__rs3qh.parseQuickGuide(
+			"==S==\n{{Needed|[[Red dye]], [[Bolt of cloth|6 bolts of cloth]], [[Red dye]]}}\n{{Checklist|\n* Do it.\n}}\n"
+		);
+		check("parser: piped link keeps page name",
+			g2.sections[0].items.indexOf("Bolt of cloth") !== -1);
+		check("parser: needed text readable",
+			g2.sections[0].needed[0].indexOf("6 bolts of cloth") !== -1);
+
+		document.getElementById("results").textContent =
+			out.join("\n") + "\n\n" + (failures ? failures + " FAILED" : "ALL TESTS PASSED");
+	})();
+	</script>
+</body>
+</html>

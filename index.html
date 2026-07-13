@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>RS3 Quest Helper</title>
+	<link rel="stylesheet" href="style.css">
+</head>
+<body>
+	<div id="alt1-banner" class="banner hidden">
+		Not running inside Alt1.
+		<a id="addtoalt1" href="#">Click here to add this app to Alt1</a>
+	</div>
+
+	<!-- Home view: searchable quest index -->
+	<div id="view-home" class="view">
+		<header>
+			<input id="search" type="search" placeholder="Search quests&hellip;" autocomplete="off">
+		</header>
+		<div class="home-tools">
+			<input id="rsn" type="text" placeholder="RuneScape name" autocomplete="off" title="Your in-game name, used to fetch quest completion from RuneMetrics">
+			<button id="btn-sync" title="Fetch your quest statuses from RuneMetrics (profile must not be private)">Sync</button>
+			<label title="Hide quests you have completed in game"><input type="checkbox" id="hide-done"> Hide done</label>
+			<select id="sort-mode" title="Sort order">
+				<option value="az">A&ndash;Z</option>
+				<option value="optimal">Optimal order</option>
+			</select>
+		</div>
+		<div id="sync-status" class="status hidden"></div>
+		<div id="rm-import" class="rm-import hidden">
+			<div>
+				<a id="rm-open" href="#" target="_blank">1. Open your RuneMetrics data</a>
+				<span> — copy the whole page (Ctrl+A, Ctrl+C), paste it below, then Import.</span>
+			</div>
+			<textarea id="rm-json" rows="3" placeholder='Paste the {"quests":[...]} text here'></textarea>
+			<div class="rm-import-row">
+				<button id="btn-rm-import">2. Import</button>
+				<button id="btn-rm-cancel">Cancel</button>
+			</div>
+		</div>
+		<div id="index-status" class="status hidden"></div>
+		<main id="quest-list"></main>
+	</div>
+
+	<!-- Guide view: steps for the selected quest -->
+	<div id="view-guide" class="view hidden">
+		<header>
+			<button id="btn-home" title="Back to quest list">&#9664;</button>
+			<div id="guide-title" class="guide-title"></div>
+			<div class="progress-wrap">
+				<div class="progress-bar"><div id="progress-fill"></div></div>
+				<span id="progress-label"></span>
+			</div>
+		</header>
+		<section class="quest-meta">
+			<div id="quest-info"></div>
+			<details id="items-panel" class="hidden" open>
+				<summary>Items needed</summary>
+				<ul id="items-list"></ul>
+				<ul id="scan-list"></ul>
+				<div class="scan-row">
+					<button id="btn-scan" title="Look for each item's icon on the game screen (open your backpack first)">Scan backpack</button>
+					<span id="scan-status"></span>
+				</div>
+			</details>
+		</section>
+		<div id="guide-status" class="status hidden"></div>
+		<main id="steps"></main>
+		<div id="map-panel" class="map-panel hidden">
+			<div class="map-bar">
+				<span id="map-label"></span>
+				<a id="map-external" target="_blank">Open in browser</a>
+				<button id="map-close" title="Close map">&#10005;</button>
+			</div>
+			<iframe id="map-frame" src="about:blank" title="World map"></iframe>
+		</div>
+		<div id="assist-status" class="assist-status hidden"></div>
+		<footer>
+			<button id="btn-back" title="Un-complete the previous step">&#9664; Back</button>
+			<button id="btn-next" class="primary" title="Complete the current step">Done, next &#9654;</button>
+			<button id="btn-overlay" title="Show the current step on top of the game screen">Overlay: off</button>
+			<button id="btn-assist" title="Highlight matching dialogue options in game and watch the chatbox">Assist: off</button>
+			<button id="btn-auto" title="Automatically tick dialogue steps when the conversation ends (needs Assist)">Auto: off</button>
+			<button id="btn-reset" title="Clear all progress for this quest">Reset</button>
+		</footer>
+	</div>
+
+	<script src="libs/a1lib.js"></script>
+	<script src="libs/ocr.js"></script>
+	<script src="libs/dialog.js"></script>
+	<script src="libs/chatbox.js"></script>
+	<script src="app.js"></script>
+</body>
+</html>
