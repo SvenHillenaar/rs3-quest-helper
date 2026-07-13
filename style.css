@@ -367,6 +367,25 @@ main {
 
 .sub-list li { padding: 1px 0; }
 
+.sub-list li.sub-step {
+	cursor: pointer;
+	border-radius: 3px;
+	padding: 2px 4px;
+}
+
+.sub-list li.sub-step:hover { background: var(--panel-2); }
+
+.sub-list li.sub-step.done {
+	opacity: .55;
+	text-decoration: line-through;
+}
+
+.sub-list li.sub-step input[type=checkbox] {
+	accent-color: var(--green);
+	pointer-events: none;
+	vertical-align: middle;
+}
+
 .sub-list .members {
 	color: var(--gold);
 	font-size: 10px;

@@ -622,6 +622,9 @@
 	// considered finished when a dialogue was on screen for >=2 ticks and
 	// has then been gone for >=3 ticks (~2s), i.e. the conversation ended.
 	var convo = { key: null, seen: 0, gone: 0 };
+	// The step/sub-step whose chat options were last seen matched in a
+	// dialogue — that is what gets ticked when the conversation ends.
+	var assistLastTarget = null;
 
 	function convoTrack(key, dialogVisible) {
 		if (convo.key !== key) { convo.key = key; convo.seen = 0; convo.gone = 0; }
@@ -782,9 +785,19 @@
 			}
 		} catch (e) { /* chat reading is best-effort */ }
 
-		// Highlight the dialogue option for the current step.
+		// Highlight dialogue options for the current step and its unchecked
+		// sub-steps; auto-tick whichever one the finished conversation was for.
 		var step = currentStep();
-		if (!step || !step.chat) {
+		var targets = [];
+		if (step) {
+			if (step.chat) targets.push({ chat: step.chat, subIndex: null, label: step.text });
+			(step.subs || []).forEach(function (sub, k) {
+				if (sub.chat && !isSubDone(step, k)) {
+					targets.push({ chat: sub.chat, subIndex: k, label: sub.text });
+				}
+			});
+		}
+		if (!step || !targets.length) {
 			clearAssistOverlay();
 			setAssistStatus("Assist: on — current step has no dialogue options" + (chatFound ? "; watching chat." : "."));
 			return;
@@ -792,17 +805,25 @@
 		try {
 			var pos = dialogReader.find(img);
 
-			// Auto-tick: the conversation for this step just ended.
+			// Auto-tick: a conversation for this step just ended.
 			if (autoAdvance && convoTrack(stepKey(step), !!pos)) {
 				clearAssistOverlay();
-				setDone(step, true);
-				setAssistStatus("Assist: conversation finished — step ticked automatically.");
+				var t = assistLastTarget;
+				assistLastTarget = null;
+				if (t && t.key === stepKey(step) && t.subIndex !== null) {
+					setSubDone(step, t.subIndex, true);
+					setAssistStatus("Assist: conversation finished — sub-step ticked automatically.");
+				} else {
+					setDone(step, true);
+					setAssistStatus("Assist: conversation finished — step ticked automatically.");
+				}
 				return;
 			}
 
 			if (!pos) {
 				clearAssistOverlay();
-				setAssistStatus("Assist: on — waiting for a dialogue box. Target: " + step.chat);
+				setAssistStatus("Assist: on — waiting for a dialogue box. Target: " +
+					targets.map(function (t) { return t.chat; }).join(" | "));
 				return;
 			}
 			var dlg = dialogReader.read(img);
@@ -811,13 +832,24 @@
 				setAssistStatus("Assist: dialogue open, no options readable yet.");
 				return;
 			}
-			var matches = matchOptions(step.chat, dlg.opts);
-			if (matches.length) {
-				drawOptionBoxes(matches, pos);
-				setAssistStatus("Assist: highlighted \"" + (matches[0].text || ("option " + (dlg.opts.indexOf(matches[0]) + 1))) + "\"");
+			var allMatches = [];
+			var matchedTarget = null;
+			targets.forEach(function (t) {
+				var m = matchOptions(t.chat, dlg.opts);
+				if (m.length && !matchedTarget) matchedTarget = t;
+				m.forEach(function (o) {
+					if (allMatches.indexOf(o) === -1) allMatches.push(o);
+				});
+			});
+			if (allMatches.length) {
+				assistLastTarget = { key: stepKey(step), subIndex: matchedTarget.subIndex };
+				drawOptionBoxes(allMatches, pos);
+				setAssistStatus("Assist: highlighted \"" +
+					(allMatches[0].text || ("option " + (dlg.opts.indexOf(allMatches[0]) + 1))) + "\"" +
+					(matchedTarget.subIndex !== null ? " (sub-step)" : ""));
 			} else {
 				clearAssistOverlay();
-				setAssistStatus("Assist: no option matched \"" + step.chat + "\" — read: " +
+				setAssistStatus("Assist: no option matched — read: " +
 					dlg.opts.map(function (o) { return o.text; }).join(" | "));
 			}
 		} catch (e) {
@@ -833,6 +865,7 @@
 			if (!dialogReader) dialogReader = new Dialog.default();
 			if (!chatReader && typeof Chatbox !== "undefined") chatReader = new Chatbox.default();
 			chatFound = false;
+			assistLastTarget = null;
 			assistTimer = setInterval(assistTick, ASSIST_INTERVAL_MS);
 			assistTick();
 			btn.textContent = "Assist: on";
@@ -942,8 +975,34 @@
 		return step.sectionIndex + ":" + step.stepIndex;
 	}
 
+	function subKey(step, k) {
+		return stepKey(step) + ":" + k;
+	}
+
 	function isDone(step) {
 		return !!questProgress().done[stepKey(step)];
+	}
+
+	function isSubDone(step, k) {
+		return !!questProgress().done[subKey(step, k)];
+	}
+
+	function setSubDone(step, k, done) {
+		var p = questProgress();
+		if (done) p.done[subKey(step, k)] = true;
+		else delete p.done[subKey(step, k)];
+		// Completing every sub-step completes the step itself; un-ticking a
+		// sub re-opens a step that had been completed.
+		var subs = step.subs || [];
+		var allDone = subs.length > 0;
+		for (var i = 0; i < subs.length; i++) {
+			if (!isSubDone(step, i)) { allDone = false; break; }
+		}
+		if (allDone) p.done[stepKey(step)] = true;
+		else if (!done) delete p.done[stepKey(step)];
+		store(PROGRESS_KEY, progress);
+		renderSteps();
+		if (overlayTimer) paintOverlay();
 	}
 
 	function currentStep() {
@@ -954,8 +1013,14 @@
 	}
 
 	function setDone(step, done) {
-		if (done) questProgress().done[stepKey(step)] = true;
-		else delete questProgress().done[stepKey(step)];
+		var p = questProgress();
+		if (done) p.done[stepKey(step)] = true;
+		else delete p.done[stepKey(step)];
+		// Ticking a step cascades to its sub-steps either way.
+		(step.subs || []).forEach(function (_, k) {
+			if (done) p.done[subKey(step, k)] = true;
+			else delete p.done[subKey(step, k)];
+		});
 		store(PROGRESS_KEY, progress);
 		renderSteps();
 		if (overlayTimer) paintOverlay();
@@ -1134,10 +1199,21 @@
 				if (stepData.note) body.appendChild(el("span", "step-note", stepData.note));
 				if (stepData.sub && stepData.sub.length) {
 					var ul = el("ul", "sub-list");
-					stepData.sub.forEach(function (item) {
-						var li = el("li", null, "• " + item.text);
+					stepData.sub.forEach(function (item, k) {
+						var subDone = isSubDone(step, k);
+						var li = el("li", "sub-step" + (subDone ? " done" : ""));
+						var sbox = document.createElement("input");
+						sbox.type = "checkbox";
+						sbox.checked = subDone;
+						sbox.tabIndex = -1;
+						li.appendChild(sbox);
+						li.appendChild(document.createTextNode(" " + item.text));
 						if (item.chat) li.appendChild(el("span", "chip", "Chat: " + item.chat));
 						(item.maps || []).forEach(function (m) { li.appendChild(mapChip(m)); });
+						li.addEventListener("click", function (e) {
+							e.stopPropagation();
+							setSubDone(step, k, !isSubDone(step, k));
+						});
 						ul.appendChild(li);
 					});
 					body.appendChild(ul);
@@ -1177,7 +1253,13 @@
 			flatSteps = [];
 			guide.sections.forEach(function (section, si) {
 				section.steps.forEach(function (stepData, ti) {
-					flatSteps.push({ sectionIndex: si, stepIndex: ti, text: stepData.text, chat: stepData.chat });
+					flatSteps.push({
+						sectionIndex: si,
+						stepIndex: ti,
+						text: stepData.text,
+						chat: stepData.chat,
+						subs: stepData.sub || []
+					});
 				});
 			});
 			setStatus("guide-status", flatSteps.length ? "" : "This guide has no parseable steps — use the wiki link above.");
