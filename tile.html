@@ -364,6 +364,7 @@
 
 		if (typeof window.alt1 !== "undefined") {
 			alt1.identifyAppUrl("./appconfig-tile.json");
+			window.addEventListener("unload", clear);
 		} else {
 			var note = document.getElementById("alt1-note");
 			note.classList.remove("hidden");

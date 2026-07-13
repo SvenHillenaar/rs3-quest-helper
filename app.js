@@ -763,6 +763,8 @@
 
 	function paintOverlay() {
 		if (!inAlt1() || !alt1.permissionOverlay || !guide) return;
+		// Game closed or unlinked: clean up rather than paint into nowhere.
+		if (alt1.rsLinked === false) { clearOverlay(); return; }
 		var step = currentStep();
 		var doneCount = 0;
 		flatSteps.forEach(function (s) { if (isDone(s)) doneCount++; });
@@ -968,6 +970,7 @@
 
 	function assistTick() {
 		if (!guide) { setAssistStatus(""); return; }
+		if (alt1.rsLinked === false) { clearAssistOverlay(); return; }
 		var img;
 		try {
 			img = A1lib.captureHoldFullRs();
@@ -2020,6 +2023,12 @@
 
 		if (inAlt1()) {
 			alt1.identifyAppUrl("./appconfig.json");
+			// Wipe our overlays the moment the app window closes; painted
+			// overlays would otherwise linger until their timer expires.
+			window.addEventListener("unload", function () {
+				clearOverlay();
+				clearAssistOverlay();
+			});
 		} else {
 			var banner = document.getElementById("alt1-banner");
 			banner.classList.remove("hidden");
