@@ -2007,9 +2007,19 @@
 		}
 
 		var freeDragging = false;
-		freeBox.addEventListener("mousedown", function (e) { freeDragging = true; placeFree(e); });
+		var freeHideTimer = null;
+		freeBox.addEventListener("mousedown", function (e) {
+			freeDragging = true;
+			if (freeHideTimer) { clearTimeout(freeHideTimer); freeHideTimer = null; }
+			placeFree(e);
+		});
 		window.addEventListener("mousemove", function (e) { if (freeDragging) placeFree(e); });
-		window.addEventListener("mouseup", function () { freeDragging = false; });
+		window.addEventListener("mouseup", function () {
+			if (!freeDragging) return;
+			freeDragging = false;
+			// Placement done — tuck the box away shortly after.
+			freeHideTimer = setTimeout(function () { show("free-pos", false); }, 1200);
+		});
 
 		overlayPos.value = prefs.overlayPos || "tc";
 		show("free-pos", overlayPos.value === "free");
@@ -2019,6 +2029,11 @@
 			store(PREFS_KEY, prefs);
 			show("free-pos", overlayPos.value === "free");
 			if (overlayTimer) paintOverlay();
+		});
+		// Re-open the placement box by clicking the dropdown while "Free…"
+		// is already selected.
+		overlayPos.addEventListener("click", function () {
+			if (overlayPos.value === "free") show("free-pos", true);
 		});
 
 		if (inAlt1()) {
