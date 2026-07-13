@@ -753,6 +753,10 @@
 			case "tl": return { x: margin, y: margin };
 			case "tr": return { x: Math.max(0, alt1.rsWidth - w - margin), y: margin };
 			case "bc": return { x: Math.max(0, Math.round((alt1.rsWidth - w) / 2)), y: Math.max(0, alt1.rsHeight - h - 130) };
+			case "free": return {
+				x: Math.round((prefs.overlayFreeX === undefined ? 0.5 : prefs.overlayFreeX) * Math.max(0, alt1.rsWidth - w)),
+				y: Math.round((prefs.overlayFreeY === undefined ? 0.05 : prefs.overlayFreeY) * Math.max(0, alt1.rsHeight - h))
+			};
 			default: return { x: Math.max(0, Math.round((alt1.rsWidth - w) / 2)), y: margin };
 		}
 	}
@@ -1113,7 +1117,8 @@
 		return { mats: mats, skill: skill, level: lvl };
 	}
 
-	// Turn a rendered shop-locations section into "Seller — Location — Price" rows.
+	// Turn a rendered shop-locations section into rows of
+	// { text: "Seller — Location — price", page: "Shop article title" }.
 	function parseShopRows(html) {
 		var rows = [];
 		try {
@@ -1123,15 +1128,40 @@
 			var trs = table.querySelectorAll("tr");
 			for (var i = 1; i < trs.length && rows.length < 5; i++) {
 				var cells = trs[i].querySelectorAll("td");
+				if (!cells.length) continue;
 				var texts = [];
-				for (var c = 0; c < Math.min(cells.length, 3); c++) {
+				for (var c = 0; c < Math.min(cells.length, 2); c++) {
 					var t = cells[c].textContent.replace(/\s+/g, " ").trim();
 					if (t) texts.push(t);
 				}
-				if (texts.length) rows.push(texts.join(" — "));
+				// Sell price column (position 3) when the table has one.
+				if (cells.length > 3) {
+					var price = cells[3].textContent.replace(/\s+/g, " ").trim();
+					if (price) texts.push(price);
+				}
+				if (!texts.length) continue;
+				var row = { text: texts.join(" — "), page: null };
+				var a = cells[0].querySelector("a[title]");
+				if (a) row.page = a.getAttribute("title");
+				if (cells.length > 5 && /member/i.test(cells[5].textContent)) row.text += " (members)";
+				rows.push(row);
 			}
 		} catch (e) { /* tolerate table changes */ }
 		return rows;
+	}
+
+	// First sentence of a shop's intro that hints at an unlock requirement.
+	function questLockNote(extract) {
+		if (!extract) return null;
+		var sentences = extract.split(". ");
+		for (var i = 0; i < sentences.length; i++) {
+			if (/quest|requir|unlock|only (be )?(accessed|used|entered)|after (complet|start)|must (have|be)/i.test(sentences[i])) {
+				var s = sentences[i].trim();
+				if (s && !/\.$/.test(s)) s += ".";
+				return s.length > 160 ? s.slice(0, 157) + "…" : s;
+			}
+		}
+		return null;
 	}
 
 	function renderItemInfo(name, info) {
@@ -1146,7 +1176,11 @@
 		if (info.shops && info.shops.length) {
 			body.appendChild(el("div", "req-head", "Sold by"));
 			var ul = el("ul", null);
-			info.shops.forEach(function (s) { ul.appendChild(el("li", null, s)); });
+			info.shops.forEach(function (s) {
+				var li = el("li", null, s.text);
+				if (s.lock) li.appendChild(el("div", "shop-lock", "⚠ " + s.lock));
+				ul.appendChild(li);
+			});
 			body.appendChild(ul);
 		}
 		if (!info.intro && !info.recipe && (!info.shops || !info.shops.length)) {
@@ -1197,7 +1231,30 @@
 					pending++;
 					wikiGet({ action: "parse", page: name, prop: "text", section: shop.index, redirects: "1" }, function (td) {
 						try { info.shops = parseShopRows(td.parse.text["*"]); } catch (e) { /* none */ }
-						done();
+						// Shops can be quest-locked; their own pages say so.
+						var titles = [];
+						info.shops.forEach(function (s) {
+							if (s.page && titles.indexOf(s.page) === -1) titles.push(s.page);
+						});
+						if (!titles.length) { done(); return; }
+						wikiGet({
+							action: "query", prop: "extracts", exintro: "1", explaintext: "1",
+							redirects: "1", titles: titles.slice(0, 15).join("|")
+						}, function (ed) {
+							try {
+								var pages = ed.query.pages;
+								var byTitle = {};
+								Object.keys(pages).forEach(function (k) {
+									byTitle[pages[k].title] = pages[k].extract || "";
+								});
+								info.shops.forEach(function (s) {
+									if (s.page && byTitle[s.page] !== undefined) {
+										s.lock = questLockNote(byTitle[s.page]);
+									}
+								});
+							} catch (e) { /* extracts unavailable */ }
+							done();
+						}, done);
 					}, done);
 				}
 				done();
@@ -1928,10 +1985,36 @@
 		});
 
 		var overlayPos = document.getElementById("overlay-pos");
+		var freePanel = document.getElementById("free-pos");
+		var freeBox = document.getElementById("free-pos-box");
+		var freeDot = document.getElementById("free-pos-dot");
+
+		function refreshFreeDot() {
+			freeDot.style.left = ((prefs.overlayFreeX === undefined ? 0.5 : prefs.overlayFreeX) * 100) + "%";
+			freeDot.style.top = ((prefs.overlayFreeY === undefined ? 0.05 : prefs.overlayFreeY) * 100) + "%";
+		}
+
+		function placeFree(e) {
+			var r = freeBox.getBoundingClientRect();
+			prefs.overlayFreeX = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+			prefs.overlayFreeY = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+			store(PREFS_KEY, prefs);
+			refreshFreeDot();
+			if (overlayTimer) paintOverlay();
+		}
+
+		var freeDragging = false;
+		freeBox.addEventListener("mousedown", function (e) { freeDragging = true; placeFree(e); });
+		window.addEventListener("mousemove", function (e) { if (freeDragging) placeFree(e); });
+		window.addEventListener("mouseup", function () { freeDragging = false; });
+
 		overlayPos.value = prefs.overlayPos || "tc";
+		show("free-pos", overlayPos.value === "free");
+		refreshFreeDot();
 		overlayPos.addEventListener("change", function () {
 			prefs.overlayPos = overlayPos.value;
 			store(PREFS_KEY, prefs);
+			show("free-pos", overlayPos.value === "free");
 			if (overlayTimer) paintOverlay();
 		});
 
@@ -1995,6 +2078,7 @@
 		parseQuestDetails: parseQuestDetails,
 		parseRecipe: parseRecipe,
 		parseShopRows: parseShopRows,
+		questLockNote: questLockNote,
 		fetchRuneMetrics: fetchRuneMetrics,
 		setAuto: function (v) { autoAdvance = v; }
 	};

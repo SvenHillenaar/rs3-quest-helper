@@ -177,11 +177,19 @@
 		check("recipe: absent -> null", window.__rs3qh.parseRecipe("nothing here") === null);
 
 		var shops = window.__rs3qh.parseShopRows(
-			"<div><table><tr><th>Seller</th><th>Location</th><th>Cost</th></tr>" +
-			"<tr><td>Obli's General Store</td><td>Shilo Village</td><td>45</td></tr>" +
-			"<tr><td>Karamja General Store</td><td>Musa Point</td><td>45</td></tr></table></div>"
+			"<div><table><tr><th>Seller</th><th>Location</th><th>Stock</th><th>Sold at</th><th>Bought at</th><th>Members</th></tr>" +
+			"<tr><td><a title=\"Obli's General Store\">Obli</a></td><td>Shilo Village</td><td>10</td><td>45 coins</td><td>20</td><td>Members-only</td></tr>" +
+			"<tr><td>Karamja General Store</td><td>Musa Point</td><td>10</td><td>45 coins</td><td>20</td><td>F2P</td></tr></table></div>"
 		);
-		check("shops: rows parsed", shops.length === 2 && shops[0] === "Obli's General Store — Shilo Village — 45");
+		check("shops: rows parsed", shops.length === 2 && shops[0].text === "Obli — Shilo Village — 45 coins (members)");
+		check("shops: shop page captured", shops[0].page === "Obli's General Store" && shops[1].page === null);
+		check("shops: f2p has no members suffix", shops[1].text.indexOf("members") === -1);
+
+		var lock = window.__rs3qh.questLockNote(
+			"The Spice is Right is a shop in Sophanem. It can only be accessed after starting Icthlarin's Little Helper. It sells spices."
+		);
+		check("shop lock: quest sentence found", !!lock && lock.indexOf("Icthlarin") !== -1);
+		check("shop lock: none for plain shops", window.__rs3qh.questLockNote("A nice shop in Varrock. It sells swords.") === null);
 
 		// Overlay card renders with content (non-empty pixels, sane size).
 		var card = window.__rs3qh.testOverlayCard();

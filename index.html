@@ -80,6 +80,12 @@
 			</div>
 			<iframe id="map-frame" src="about:blank" title="World map"></iframe>
 		</div>
+		<div id="free-pos" class="free-pos hidden">
+			<div id="free-pos-box" class="free-pos-box" title="Click or drag to place the overlay on the game screen">
+				<div id="free-pos-dot"></div>
+			</div>
+			<span>Click or drag inside the box to place the overlay. It stays locked there until you move it again.</span>
+		</div>
 		<div id="assist-status" class="assist-status hidden"></div>
 		<footer>
 			<button id="btn-back" title="Un-complete the previous step">&#9664; Back</button>
@@ -90,6 +96,7 @@
 				<option value="tl">Top-left</option>
 				<option value="tr">Top-right</option>
 				<option value="bc">Bottom</option>
+				<option value="free">Free…</option>
 			</select>
 			<button id="btn-assist" title="Highlight matching dialogue options in game and watch the chatbox">Assist: off</button>
 			<button id="btn-auto" title="Automatically tick dialogue steps when the conversation ends (needs Assist)">Auto: off</button>

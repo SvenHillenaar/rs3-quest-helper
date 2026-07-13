@@ -538,6 +538,46 @@ main {
 	background: #111;
 }
 
+.free-pos {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 6px 10px;
+	background: var(--panel);
+	border-top: 1px solid var(--border);
+	font-size: 11px;
+	color: var(--muted);
+}
+
+.free-pos.hidden { display: none; }
+
+.free-pos-box {
+	position: relative;
+	width: 128px;
+	height: 72px;
+	flex-shrink: 0;
+	background: var(--bg);
+	border: 1px solid var(--gold);
+	border-radius: 3px;
+	cursor: crosshair;
+}
+
+#free-pos-dot {
+	position: absolute;
+	width: 10px;
+	height: 6px;
+	margin: -3px 0 0 -5px;
+	background: var(--gold);
+	border-radius: 2px;
+	pointer-events: none;
+}
+
+.shop-lock {
+	color: var(--gold);
+	font-size: 11px;
+	margin-top: 1px;
+}
+
 .assist-status {
 	padding: 4px 10px;
 	font-size: 11px;
