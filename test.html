@@ -32,6 +32,7 @@
 	<script src="libs/ocr.js"></script>
 	<script src="libs/dialog.js"></script>
 	<script src="libs/chatbox.js"></script>
+	<script src="libs/font_digits.js"></script>
 	<script src="app.js"></script>
 	<script>
 	(function () {
@@ -45,6 +46,7 @@
 
 		// Libraries loaded and expose the expected globals?
 		check("A1lib global", typeof A1lib !== "undefined" && !!A1lib.captureHoldFullRs);
+		check("digit font global", typeof Alt1Fonts !== "undefined" && !!Alt1Fonts.pixel_8px_digits);
 		check("OCR global", typeof OCR !== "undefined" && !!OCR.readLine);
 		check("Dialog global", typeof Dialog !== "undefined" && !!Dialog.default);
 		check("Chatbox global", typeof Chatbox !== "undefined" && !!Chatbox.default);
@@ -175,14 +177,20 @@
 		check("parser: sub step", g.sections[0].steps[1].sub.length === 1);
 		check("parser: item names from Needed links",
 			g.sections[0].items && g.sections[0].items.length === 2 &&
-			g.sections[0].items[0] === "hammer" && g.sections[0].items[1] === "nail");
+			g.sections[0].items[0].name === "hammer" && g.sections[0].items[1].name === "nail");
+		check("parser: quantity before link", g.sections[0].items[1].qty === 2);
+		check("parser: no quantity defaults to 1", g.sections[0].items[0].qty === 1);
 
-		// Piped/anchored links and duplicates in Needed lines.
+		// Piped/anchored links, quantities in labels, dose notation.
 		var g2 = window.__rs3qh.parseQuickGuide(
-			"==S==\n{{Needed|[[Red dye]], [[Bolt of cloth|6 bolts of cloth]], [[Red dye]]}}\n{{Checklist|\n* Do it.\n}}\n"
+			"==S==\n{{Needed|3 [[Cadava berries]], 10 [[fishing bait]], [[antipoison#(3)|antipoison (3)]], [[Bolt of cloth|6 bolts of cloth]], [[Red dye]]}}\n{{Checklist|\n* Do it.\n}}\n"
 		);
-		check("parser: piped link keeps page name",
-			g2.sections[0].items.indexOf("Bolt of cloth") !== -1);
+		var byName = {};
+		g2.sections[0].items.forEach(function (it) { byName[it.name] = it.qty; });
+		check("parser: qty 3 cadava", byName["Cadava berries"] === 3);
+		check("parser: qty 10 bait", byName["fishing bait"] === 10);
+		check("parser: dose anchor becomes dosed name, qty 1", byName["antipoison (3)"] === 1);
+		check("parser: qty from piped label", byName["Bolt of cloth"] === 6);
 		check("parser: needed text readable",
 			g2.sections[0].needed[0].indexOf("6 bolts of cloth") !== -1);
 

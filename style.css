@@ -265,7 +265,13 @@ header {
 
 .scan-mark.ok { color: var(--green); }
 .scan-mark.missing { color: var(--red); }
-.scan-mark.unknown { color: var(--muted); }
+.scan-mark.unknown { color: var(--gold); }
+
+.scan-count {
+	font-size: 11px;
+	color: var(--muted);
+	font-family: monospace;
+}
 
 .scan-row {
 	display: flex;

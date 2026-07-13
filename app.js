@@ -10,7 +10,7 @@
 
 	var WIKI_API = "https://runescape.wiki/api.php";
 	var INDEX_CACHE_KEY = "rs3qh-index-v1";
-	var GUIDE_CACHE_KEY = "rs3qh-guides-v4";
+	var GUIDE_CACHE_KEY = "rs3qh-guides-v5";
 	var PROGRESS_KEY = "rs3qh-progress-v2";
 	var INDEX_TTL_MS = 7 * 24 * 3600 * 1000;
 	var GUIDE_TTL_MS = 7 * 24 * 3600 * 1000;
@@ -335,12 +335,24 @@
 			if (name === "chat options" || name === "chat") {
 				out = CHAT_OPEN + args.join(" / ") + CHAT_CLOSE;
 			} else if (name === "needed" || name === "recommended") {
-				out = NEEDED_MARK + (name === "recommended" ? "Recommended: " : "") + args.join(", ");
+				var src = args.join(", ");
+				out = NEEDED_MARK + (name === "recommended" ? "Recommended: " : "") + src;
 				// Item links inside Needed lines are exact wiki page names —
-				// keep them so the backpack scanner knows what to look for.
-				var lm, lre = /\[\[([^\]|#]+)[^\]]*\]\]/g;
-				while ((lm = lre.exec(args.join(","))) !== null) {
-					out += ITEM_OPEN + lm[1].trim() + ITEM_CLOSE;
+				// keep them (with the required amount, when the guide gives
+				// one) so the backpack scanner knows what to look for.
+				var lm, lre = /\[\[([^\]|#]+)(?:#([^\]|]*))?(?:\|([^\]]*))?\]\]/g;
+				while ((lm = lre.exec(src)) !== null) {
+					var iname = lm[1].trim();
+					var anchor = (lm[2] || "").trim();
+					// Potion links use dose anchors ([[antipoison#(3)|...]]);
+					// the dosed name is also the icon's file name.
+					if (/^\(\d+\)$/.test(anchor)) iname += " " + anchor;
+					var qty = 1;
+					var before = /(\d+)\s*(?:x\s*)?$/i.exec(src.slice(Math.max(0, lm.index - 10), lm.index));
+					var labelNum = /^(\d+)\s/.exec((lm[3] || "").trim());
+					if (before) qty = +before[1];
+					else if (labelNum) qty = +labelNum[1];
+					out += ITEM_OPEN + iname + "|" + qty + ITEM_CLOSE;
 				}
 			} else if (name === "checklist") {
 				out = "\n" + args.join("\n") + "\n";
@@ -420,8 +432,11 @@
 		while ((start = text.indexOf(ITEM_OPEN)) !== -1) {
 			var iend = text.indexOf(ITEM_CLOSE, start);
 			if (iend === -1) { text = text.replace(ITEM_OPEN, ""); continue; }
-			var iname = text.slice(start + ITEM_OPEN.length, iend).trim();
-			if (iname) items.push(iname);
+			var ibody = text.slice(start + ITEM_OPEN.length, iend);
+			var isep = ibody.lastIndexOf("|");
+			var iname = (isep === -1 ? ibody : ibody.slice(0, isep)).trim();
+			var iqty = isep === -1 ? 1 : Math.max(1, parseInt(ibody.slice(isep + 1), 10) || 1);
+			if (iname) items.push({ name: iname, qty: iqty });
 			text = text.slice(0, start) + text.slice(iend + ITEM_CLOSE.length);
 		}
 		var images = [];
@@ -941,12 +956,37 @@
 	function getItemIcon(name) {
 		if (name in iconCache) return Promise.resolve(iconCache[name]);
 		return A1lib.ImageDetect.imageDataFromUrl(itemIconUrl(name)).then(function (img) {
-			iconCache[name] = maskStackCorner(img);
+			maskStackCorner(img);
+			// Nearly-black icons (e.g. charcoal) match any dark screen area,
+			// so their hits cannot be trusted.
+			var opaque = 0, bright = 0;
+			for (var i = 0; i < img.data.length; i += 4) {
+				if (img.data[i + 3] > 200) {
+					opaque++;
+					if (img.data[i] + img.data[i + 1] + img.data[i + 2] > 150) bright++;
+				}
+			}
+			iconCache[name] = { img: img, reliable: opaque >= 60 && bright >= 20 };
 			return iconCache[name];
 		}, function () {
 			iconCache[name] = null;
 			return null;
 		});
+	}
+
+	// Stack sizes render in the small pixel font at the top-left of the
+	// slot; read them to verify required amounts of stackable items.
+	function readStackNumber(imgref, pos) {
+		try {
+			if (typeof Alt1Fonts === "undefined" || !Alt1Fonts.pixel_8px_digits) return null;
+			var buf = imgref.toData(Math.max(0, pos.x - 14), Math.max(0, pos.y - 18), 64, 26);
+			var res = OCR.findReadLine(buf, Alt1Fonts.pixel_8px_digits,
+				[[255, 255, 0], [255, 255, 255], [0, 255, 128]], 2, 2, 60, 22);
+			var digits = res && res.text ? res.text.replace(/[^0-9]/g, "") : "";
+			return digits ? parseInt(digits, 10) : null;
+		} catch (e) {
+			return null;
+		}
 	}
 
 	// Linked pages in Needed lines that are not scannable backpack items.
@@ -955,27 +995,32 @@
 	function currentItemNames() {
 		if (!guide) return [];
 		var seen = {};
-		var names = [];
+		var list = [];
 		guide.sections.forEach(function (s) {
-			(s.items || []).forEach(function (n) {
-				var k = n.toLowerCase();
+			(s.items || []).forEach(function (it) {
+				var k = it.name.toLowerCase();
 				if (NON_ITEMS.indexOf(k) !== -1) return;
-				if (!seen[k]) { seen[k] = true; names.push(n); }
+				if (seen[k] === undefined) {
+					seen[k] = list.length;
+					list.push({ name: it.name, qty: it.qty || 1 });
+				} else {
+					list[seen[k]].qty = Math.max(list[seen[k]].qty, it.qty || 1);
+				}
 			});
 		});
-		return names;
+		return list;
 	}
 
 	function scanBackpack() {
-		var names = currentItemNames();
+		var items = currentItemNames();
 		var status = document.getElementById("scan-status");
-		if (!names.length) { status.textContent = "This guide lists no linked items."; return; }
+		if (!items.length) { status.textContent = "This guide lists no linked items."; return; }
 		if (!inAlt1() || !alt1.permissionPixel) {
 			status.textContent = "Scanning needs Alt1 with the pixel permission.";
 			return;
 		}
 		status.textContent = "Loading icons…";
-		Promise.all(names.map(getItemIcon)).then(function (icons) {
+		Promise.all(items.map(function (it) { return getItemIcon(it.name); })).then(function (icons) {
 			status.textContent = "Scanning…";
 			var img;
 			try {
@@ -984,25 +1029,46 @@
 				status.textContent = "Could not capture the game screen.";
 				return;
 			}
-			var found = 0, total = 0;
-			names.forEach(function (name, i) {
+			var okCount = 0, total = 0;
+			items.forEach(function (it, i) {
 				var mark = document.querySelector('[data-scan-item="' + i + '"]');
+				var countEl = document.querySelector('[data-scan-count="' + i + '"]');
+				function set(sym, cls, title, count) {
+					if (mark) { mark.textContent = sym; mark.className = "scan-mark " + cls; mark.title = title; }
+					if (countEl) countEl.textContent = count || "";
+				}
 				if (!icons[i]) {
-					if (mark) { mark.textContent = "?"; mark.className = "scan-mark unknown"; mark.title = "Could not load this item's icon"; }
+					set("?", "unknown", "Could not load this item's icon");
 					return;
 				}
 				total++;
+				var qty = it.qty || 1;
 				var hits = [];
-				try { hits = img.findSubimage(icons[i]); } catch (e) { /* keep empty */ }
-				var ok = hits.length > 0;
-				if (ok) found++;
-				if (mark) {
-					mark.textContent = ok ? "✓" : "✗";
-					mark.className = "scan-mark " + (ok ? "ok" : "missing");
-					mark.title = ok ? "Spotted on screen" : "Not visible — check your bank";
+				try { hits = img.findSubimage(icons[i].img); } catch (e) { /* keep empty */ }
+
+				if (!hits.length) {
+					set("✗", "missing", "Not visible — check your bank", qty > 1 ? "0/" + qty : "");
+				} else if (!icons[i].reliable) {
+					// e.g. charcoal: an all-dark icon matches any dark area.
+					set("~", "unknown", "Matched, but this icon is too dark/plain to detect reliably — check manually", "");
+				} else if (hits.length >= qty) {
+					okCount++;
+					set("✓", "ok", qty > 1 ? hits.length + " separate ones spotted" : "Spotted on screen", qty > 1 ? hits.length + "/" + qty : "");
+				} else {
+					// Fewer matches than required — probably a stack; read
+					// the stack size next to the first match.
+					var n = readStackNumber(img, hits[0]);
+					if (n === null) {
+						set("~", "unknown", "Found, but the stack amount was unreadable", "?/" + qty);
+					} else if (n >= qty) {
+						okCount++;
+						set("✓", "ok", n + " in stack", n + "/" + qty);
+					} else {
+						set("✗", "missing", "Stack too small: " + n + " of " + qty + " needed", n + "/" + qty);
+					}
 				}
 			});
-			status.textContent = "Found " + found + "/" + total + " items on screen (backpack must be open; quantities not checked).";
+			status.textContent = okCount + "/" + total + " requirements met (backpack must be open and visible).";
 		});
 	}
 
@@ -1209,20 +1275,24 @@
 		items.innerHTML = "";
 		allNeeded.forEach(function (n) { items.appendChild(el("li", null, n)); });
 
-		// Scannable items: exact wiki item names extracted from Needed lines.
+		// Scannable items: exact wiki item names extracted from Needed lines,
+		// with the required amount when the guide gives one.
 		var scanList = document.getElementById("scan-list");
 		scanList.innerHTML = "";
-		var names = currentItemNames();
-		names.forEach(function (n, i) {
+		var items = currentItemNames();
+		items.forEach(function (it, i) {
 			var li = el("li", "scan-item");
 			var mark = el("span", "scan-mark", "·");
 			mark.setAttribute("data-scan-item", i);
 			li.appendChild(mark);
-			li.appendChild(document.createTextNode(" " + n));
+			li.appendChild(document.createTextNode(" " + (it.qty > 1 ? it.qty + "× " : "") + it.name + " "));
+			var count = el("span", "scan-count");
+			count.setAttribute("data-scan-count", i);
+			li.appendChild(count);
 			scanList.appendChild(li);
 		});
 		document.getElementById("scan-status").textContent = "";
-		show("items-panel", allNeeded.length > 0 || names.length > 0);
+		show("items-panel", allNeeded.length > 0 || items.length > 0);
 		// Open by default on every quest so requirements are not missed;
 		// the user can still collapse it.
 		document.getElementById("items-panel").open = true;
