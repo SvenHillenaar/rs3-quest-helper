@@ -661,25 +661,127 @@
 		return (b << 0) | (g << 8) | (r << 16) | (a << 24);
 	}
 
+	// Render the overlay as a proper card on a canvas: dark rounded panel
+	// with wrapped step text, progress, chat options and a next-step hint.
+	function renderOverlayCard(step, doneCount, total) {
+		var W = 440, PAD = 12, LH = 20;
+		var canvas = document.createElement("canvas");
+		canvas.width = W;
+		canvas.height = 220;
+		var ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+		function wrap(text, font, maxLines) {
+			ctx.font = font;
+			var words = text.split(" ");
+			var lines = [], cur = "";
+			for (var i = 0; i < words.length; i++) {
+				var probe = cur ? cur + " " + words[i] : words[i];
+				if (ctx.measureText(probe).width > W - PAD * 2 && cur) {
+					lines.push(cur);
+					cur = words[i];
+					if (lines.length === maxLines) {
+						lines[maxLines - 1] = lines[maxLines - 1].replace(/\s*\S*$/, "") + "…";
+						return lines;
+					}
+				} else {
+					cur = probe;
+				}
+			}
+			if (cur) lines.push(cur);
+			return lines.slice(0, maxLines);
+		}
+
+		var stepLines = step ? wrap(step.text, "600 15px 'Segoe UI', sans-serif", 3) : ["Quest complete! 🎉"];
+		var chatLines = step && step.chat ? wrap("Chat: " + step.chat, "13px 'Segoe UI', sans-serif", 2) : [];
+		var next = null;
+		if (step) {
+			var idx = flatSteps.indexOf(step);
+			if (idx !== -1 && idx + 1 < flatSteps.length) {
+				next = wrap("Next: " + flatSteps[idx + 1].text, "12px 'Segoe UI', sans-serif", 1)[0];
+			}
+		}
+
+		var H = PAD + 16 + 6 + stepLines.length * LH + chatLines.length * 18 + (next ? 17 : 0) + PAD;
+
+		// Panel
+		ctx.clearRect(0, 0, W, 220);
+		ctx.beginPath();
+		var r = 8;
+		ctx.moveTo(r, 0); ctx.lineTo(W - r, 0); ctx.arcTo(W, 0, W, r, r);
+		ctx.lineTo(W, H - r); ctx.arcTo(W, H, W - r, H, r);
+		ctx.lineTo(r, H); ctx.arcTo(0, H, 0, H - r, r);
+		ctx.lineTo(0, r); ctx.arcTo(0, 0, r, 0, r);
+		ctx.fillStyle = "rgba(18, 22, 18, 0.86)";
+		ctx.fill();
+		ctx.strokeStyle = "rgba(231, 193, 90, 0.9)";
+		ctx.lineWidth = 1.5;
+		ctx.stroke();
+
+		// Header: quest name + progress
+		var y = PAD + 11;
+		ctx.font = "700 11px 'Segoe UI', sans-serif";
+		ctx.fillStyle = "#e7c15a";
+		var header = (guide.name || "").toUpperCase();
+		ctx.fillText(header, PAD, y, W - PAD * 2 - 60);
+		ctx.textAlign = "right";
+		ctx.fillText(doneCount + " / " + total, W - PAD, y);
+		ctx.textAlign = "left";
+		y += 6;
+
+		// Step text
+		ctx.font = "600 15px 'Segoe UI', sans-serif";
+		ctx.fillStyle = "#f2ecd8";
+		stepLines.forEach(function (l) { y += LH; ctx.fillText(l, PAD, y); });
+
+		// Chat options
+		ctx.font = "13px 'Segoe UI', sans-serif";
+		ctx.fillStyle = "#7fb8f0";
+		chatLines.forEach(function (l) { y += 18; ctx.fillText(l, PAD, y); });
+
+		// Next step hint
+		if (next) {
+			ctx.font = "12px 'Segoe UI', sans-serif";
+			ctx.fillStyle = "rgba(200, 195, 175, 0.75)";
+			y += 17;
+			ctx.fillText(next, PAD, y);
+		}
+
+		return ctx.getImageData(0, 0, W, H);
+	}
+
+	function overlayCardPos(w, h) {
+		var margin = 18;
+		switch (prefs.overlayPos || "tc") {
+			case "tl": return { x: margin, y: margin };
+			case "tr": return { x: Math.max(0, alt1.rsWidth - w - margin), y: margin };
+			case "bc": return { x: Math.max(0, Math.round((alt1.rsWidth - w) / 2)), y: Math.max(0, alt1.rsHeight - h - 130) };
+			default: return { x: Math.max(0, Math.round((alt1.rsWidth - w) / 2)), y: margin };
+		}
+	}
+
 	function paintOverlay() {
 		if (!inAlt1() || !alt1.permissionOverlay || !guide) return;
 		var step = currentStep();
-		var text = step ? "Quest: " + step.text : "Quest complete!";
-		if (step && step.chat) text += "  [Chat: " + step.chat + "]";
-		if (text.length > 120) text = text.slice(0, 117) + "...";
+		var doneCount = 0;
+		flatSteps.forEach(function (s) { if (isDone(s)) doneCount++; });
 		try {
+			var card = renderOverlayCard(step, doneCount, flatSteps.length);
+			var pos = overlayCardPos(card.width, card.height);
 			alt1.overLaySetGroup("rs3qh");
-			alt1.overLayFreezeGroup("rs3qh");
 			alt1.overLayClearGroup("rs3qh");
-			alt1.overLayTextEx(
-				text, mixColor(231, 193, 90), 16,
-				Math.round(alt1.rsWidth / 2), 40,
-				OVERLAY_REFRESH_MS + 2000, "", true, true
-			);
+			alt1.overLayImage(pos.x, pos.y, A1lib.encodeImageString(card), card.width, OVERLAY_REFRESH_MS + 2000);
 			alt1.overLayRefreshGroup("rs3qh");
 		} catch (e) {
+			// Fall back to plain text if image overlays are unavailable.
+			var text = step ? "Quest: " + step.text : "Quest complete!";
+			if (step && step.chat) text += "  [Chat: " + step.chat + "]";
+			if (text.length > 120) text = text.slice(0, 117) + "...";
 			try {
-				alt1.overLayText(text, mixColor(231, 193, 90), 16, 40, 40, OVERLAY_REFRESH_MS + 2000);
+				alt1.overLaySetGroup("rs3qh");
+				alt1.overLayClearGroup("rs3qh");
+				alt1.overLayTextEx(text, mixColor(231, 193, 90), 16,
+					Math.round(alt1.rsWidth / 2), 40, OVERLAY_REFRESH_MS + 2000, "", true, true);
+				alt1.overLayRefreshGroup("rs3qh");
 			} catch (e2) { /* overlay unavailable */ }
 		}
 	}
@@ -1665,6 +1767,14 @@
 		document.getElementById("map-close").addEventListener("click", hideMapPanel);
 		document.getElementById("btn-scan").addEventListener("click", scanBackpack);
 
+		var overlayPos = document.getElementById("overlay-pos");
+		overlayPos.value = prefs.overlayPos || "tc";
+		overlayPos.addEventListener("change", function () {
+			prefs.overlayPos = overlayPos.value;
+			store(PREFS_KEY, prefs);
+			if (overlayTimer) paintOverlay();
+		});
+
 		if (inAlt1()) {
 			alt1.identifyAppUrl("./appconfig.json");
 		} else {
@@ -1706,6 +1816,22 @@
 		convoTrack: convoTrack,
 		normName: normName,
 		parseRmPayload: parseRmPayload,
+		testOverlayCard: function () {
+			var gsave = guide, fsave = flatSteps;
+			guide = { name: "Test Quest" };
+			flatSteps = [
+				{ text: "Talk to the very important test NPC in a place with quite a long description that should wrap onto several lines nicely.", chat: "1 Yes please. / Any" },
+				{ text: "Then do the next thing." }
+			];
+			var img;
+			try {
+				img = renderOverlayCard(flatSteps[0], 0, 2);
+			} finally {
+				guide = gsave;
+				flatSteps = fsave;
+			}
+			return img;
+		},
 		parseQuestDetails: parseQuestDetails,
 		fetchRuneMetrics: fetchRuneMetrics,
 		setAuto: function (v) { autoAdvance = v; }

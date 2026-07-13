@@ -522,6 +522,15 @@ button {
 
 button:hover { border-color: var(--gold); }
 
+footer select {
+	background: var(--panel-2);
+	color: var(--text);
+	border: 1px solid var(--border);
+	border-radius: 3px;
+	padding: 5px 4px;
+	font-size: 12px;
+}
+
 button.primary {
 	background: #3a5a2a;
 	border-color: var(--green);
