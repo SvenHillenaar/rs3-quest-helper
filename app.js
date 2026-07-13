@@ -1147,6 +1147,8 @@
 				var a = cells[0].querySelector("a[title]");
 				if (a) row.page = a.getAttribute("title");
 				if (cells.length > 5 && /member/i.test(cells[5].textContent)) row.text += " (members)";
+				// Location-implied unlocks (buildable camps, gated cities).
+				if (cells.length > 1) row.lock = locationLockNote(cells[1].textContent);
 				rows.push(row);
 			}
 		} catch (e) { /* tolerate table changes */ }
@@ -1158,11 +1160,38 @@
 		if (!extract) return null;
 		var sentences = extract.split(". ");
 		for (var i = 0; i < sentences.length; i++) {
-			if (/quest|requir|unlock|only (be )?(accessed|used|entered)|after (complet|start)|must (have|be)/i.test(sentences[i])) {
+			if (/quest|requir|unlock|only (be )?(accessed|used|entered)|after (complet|start|build)|must (have|be)|(be )?built|constructed/i.test(sentences[i])) {
 				var s = sentences[i].trim();
 				if (s && !/\.$/.test(s)) s += ".";
 				return s.length > 160 ? s.slice(0, 157) + "…" : s;
 			}
+		}
+		return null;
+	}
+
+	// Some shop locations imply an unlock by themselves (buildable camps,
+	// quest-gated cities) even when the shop's own page never says so.
+	var GATED_LOCATIONS = [
+		[/anachronia|base camp/i, "Anachronia base camp — the shop's building must be constructed at your camp first."],
+		[/fort forinthry/i, "Fort Forinthry — the relevant building must be constructed (New Foundations)."],
+		[/prifddinas/i, "Prifddinas — requires completing Plague's End."],
+		[/zanaris/i, "Zanaris — requires Lost City."],
+		[/sophanem/i, "Sophanem — requires starting Icthlarin's Little Helper."],
+		[/menaphos/i, "Menaphos — requires The Jack of Spades."],
+		[/keldagrim/i, "Keldagrim — requires starting The Giant Dwarf."],
+		[/dorgesh-kaan/i, "Dorgesh-Kaan — requires Death to the Dorgeshuun."],
+		[/lletya/i, "Lletya — requires starting Mourning's End Part I."],
+		[/miscellania|etceteria/i, "Miscellania — requires The Fremennik Trials."],
+		[/mos le'harmless/i, "Mos Le'Harmless — requires Cabin Fever."],
+		[/ape atoll|marim/i, "Ape Atoll — requires Monkey Madness."],
+		[/oo'glog/i, "Oo'glog — requires As a First Resort."],
+		[/city of um/i, "City of Um — requires the Necromancy! questline."]
+	];
+
+	function locationLockNote(location) {
+		if (!location) return null;
+		for (var i = 0; i < GATED_LOCATIONS.length; i++) {
+			if (GATED_LOCATIONS[i][0].test(location)) return GATED_LOCATIONS[i][1];
 		}
 		return null;
 	}
@@ -1252,7 +1281,9 @@
 								});
 								info.shops.forEach(function (s) {
 									if (s.page && byTitle[s.page] !== undefined) {
-										s.lock = questLockNote(byTitle[s.page]);
+										// A note from the shop's own page wins, but
+										// never erase a location-implied one.
+										s.lock = questLockNote(byTitle[s.page]) || s.lock;
 									}
 								});
 							} catch (e) { /* extracts unavailable */ }
@@ -2103,6 +2134,7 @@
 		parseRecipe: parseRecipe,
 		parseShopRows: parseShopRows,
 		questLockNote: questLockNote,
+		locationLockNote: locationLockNote,
 		fetchRuneMetrics: fetchRuneMetrics,
 		setAuto: function (v) { autoAdvance = v; }
 	};

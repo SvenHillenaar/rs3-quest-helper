@@ -190,6 +190,18 @@
 		);
 		check("shop lock: quest sentence found", !!lock && lock.indexOf("Icthlarin") !== -1);
 		check("shop lock: none for plain shops", window.__rs3qh.questLockNote("A nice shop in Varrock. It sells swords.") === null);
+		check("shop lock: build sentence found", /Town Hall/.test(window.__rs3qh.questLockNote("The shop opens once the Town Hall has been built at the camp.") || ""));
+
+		var lln = window.__rs3qh.locationLockNote;
+		check("location lock: Anachronia buildable", /constructed/.test(lln("Anachronia") || ""));
+		check("location lock: Prifddinas quest", /Plague's End/.test(lln("Prifddinas") || ""));
+		check("location lock: Varrock is free", lln("Varrock") === null);
+
+		var shopRows2 = window.__rs3qh.parseShopRows(
+			"<div><table><tr><th>Seller</th><th>Location</th><th>Stock</th><th>Sold</th><th>Bought</th><th>Members</th></tr>" +
+			"<tr><td><a title=\"Survival Shop\">Assistant</a></td><td>Anachronia</td><td>10</td><td>288 coins</td><td>86</td><td>Members</td></tr></table></div>"
+		);
+		check("shop rows: location lock attached", /constructed/.test(shopRows2[0].lock || ""));
 
 		// Overlay card renders with content (non-empty pixels, sane size).
 		var card = window.__rs3qh.testOverlayCard();
