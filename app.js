@@ -1083,6 +1083,128 @@
 		}
 	}
 
+	// ---------- item info popup (what is it, how to make, where to buy) ----------
+
+	var itemInfoCache = {};
+
+	// Pull the materials/skill out of an {{Infobox Recipe}} block.
+	function parseRecipe(wt) {
+		var idx = wt.search(/\{\{Infobox Recipe/i);
+		if (idx === -1) return null;
+		var depth = 0, end = -1;
+		for (var i = idx; i < wt.length - 1; i++) {
+			var two = wt.substr(i, 2);
+			if (two === "{{") { depth++; i++; }
+			else if (two === "}}") { depth--; i++; if (!depth) { end = i + 1; break; } }
+		}
+		if (end === -1) return null;
+		var parts = splitParams(wt.slice(idx + 2, end - 2));
+		function clean(v) { return v ? extractChat(cleanMarkup(resolveTemplates(v))).text : ""; }
+		var mats = [];
+		for (var m = 1; m <= 12; m++) {
+			var mat = namedParam(parts, "mat" + m);
+			if (!mat) break;
+			var q = namedParam(parts, "mat" + m + "quantity") || namedParam(parts, "mat" + m + "qty") || "1";
+			mats.push(clean(q) + "× " + clean(mat));
+		}
+		if (!mats.length) return null;
+		var skill = clean(namedParam(parts, "skill1") || namedParam(parts, "skill") || "");
+		var lvl = clean(namedParam(parts, "skill1lvl") || namedParam(parts, "level") || "");
+		return { mats: mats, skill: skill, level: lvl };
+	}
+
+	// Turn a rendered shop-locations section into "Seller — Location — Price" rows.
+	function parseShopRows(html) {
+		var rows = [];
+		try {
+			var doc = new DOMParser().parseFromString(html, "text/html");
+			var table = doc.querySelector("table");
+			if (!table) return rows;
+			var trs = table.querySelectorAll("tr");
+			for (var i = 1; i < trs.length && rows.length < 5; i++) {
+				var cells = trs[i].querySelectorAll("td");
+				var texts = [];
+				for (var c = 0; c < Math.min(cells.length, 3); c++) {
+					var t = cells[c].textContent.replace(/\s+/g, " ").trim();
+					if (t) texts.push(t);
+				}
+				if (texts.length) rows.push(texts.join(" — "));
+			}
+		} catch (e) { /* tolerate table changes */ }
+		return rows;
+	}
+
+	function renderItemInfo(name, info) {
+		var body = document.getElementById("item-popup-body");
+		body.innerHTML = "";
+		if (info.intro) body.appendChild(el("p", null, info.intro));
+		if (info.recipe) {
+			body.appendChild(el("div", "req-head", "How to make"));
+			body.appendChild(el("p", null, info.recipe.mats.join(", ") +
+				(info.recipe.skill ? " (" + info.recipe.skill + (info.recipe.level ? " level " + info.recipe.level : "") + ")" : "")));
+		}
+		if (info.shops && info.shops.length) {
+			body.appendChild(el("div", "req-head", "Sold by"));
+			var ul = el("ul", null);
+			info.shops.forEach(function (s) { ul.appendChild(el("li", null, s)); });
+			body.appendChild(ul);
+		}
+		if (!info.intro && !info.recipe && (!info.shops || !info.shops.length)) {
+			body.appendChild(el("p", null, "No summary available — use the full wiki page link above."));
+		}
+	}
+
+	function showItemInfo(name) {
+		var popup = document.getElementById("item-popup");
+		document.getElementById("item-popup-title").textContent = name;
+		document.getElementById("item-popup-link").href =
+			"https://runescape.wiki/w/" + encodeURIComponent(name.replace(/ /g, "_"));
+		document.getElementById("item-popup-body").textContent = "Loading from the wiki…";
+		popup.classList.remove("hidden");
+		if (itemInfoCache[name]) { renderItemInfo(name, itemInfoCache[name]); return; }
+
+		var info = { intro: "", recipe: null, shops: [] };
+		function finish() {
+			itemInfoCache[name] = info;
+			// Only render if this item is still the one being shown.
+			if (document.getElementById("item-popup-title").textContent === name) {
+				renderItemInfo(name, info);
+			}
+		}
+		wikiGet({ action: "query", prop: "extracts", exintro: "1", explaintext: "1", redirects: "1", titles: name }, function (d) {
+			try {
+				var pages = d.query.pages;
+				var ext = pages[Object.keys(pages)[0]].extract || "";
+				info.intro = ext.split("\n")[0];
+			} catch (e) { /* no extract */ }
+			wikiGet({ action: "parse", page: name, prop: "sections", redirects: "1" }, function (sd) {
+				var secs = (sd.parse && sd.parse.sections) || [];
+				var creation = null, shop = null;
+				secs.forEach(function (s) {
+					if (!creation && /creation|making/i.test(s.line)) creation = s;
+					if (!shop && /shop|store/i.test(s.line)) shop = s;
+				});
+				var pending = 1;
+				function done() { if (--pending === 0) finish(); }
+				if (creation) {
+					pending++;
+					wikiGet({ action: "parse", page: name, prop: "wikitext", section: creation.index, redirects: "1" }, function (cd) {
+						try { info.recipe = parseRecipe(cd.parse.wikitext["*"]); } catch (e) { /* none */ }
+						done();
+					}, done);
+				}
+				if (shop) {
+					pending++;
+					wikiGet({ action: "parse", page: name, prop: "text", section: shop.index, redirects: "1" }, function (td) {
+						try { info.shops = parseShopRows(td.parse.text["*"]); } catch (e) { /* none */ }
+						done();
+					}, done);
+				}
+				done();
+			}, finish);
+		}, finish);
+	}
+
 	// ---------- backpack item scanning ----------
 	// Looks for the wiki inventory icon of each required item in the game
 	// screen (transparent icon pixels act as wildcards). Presence-only: it
@@ -1137,16 +1259,27 @@
 			var font = typeof Alt1Fonts !== "undefined" ? Alt1Fonts.pixel_8px_digits : null;
 			if (font && font.default) font = font.default;
 			if (!font || !OCR.findChar) return null;
-			var buf = imgref.toData(Math.max(0, pos.x - 24), Math.max(0, pos.y - 26), 84, 44);
 			var cols = [[255, 255, 0], [255, 255, 255], [0, 255, 128], [255, 165, 0]];
-			for (var c = 0; c < cols.length; c++) {
-				var chr = OCR.findChar(buf, font, cols[c], 0, 6, buf.width - 10, buf.height - 12);
-				if (!chr) continue;
-				var r = OCR.readLine(buf, font, cols[c], chr.x, chr.y, true, true);
-				var digits = r && r.text ? r.text.replace(/[^0-9]/g, "") : "";
-				if (digits) return parseInt(digits, 10);
+			function tryRead(buf) {
+				// Prefer the longest digit run over any first hit — icon
+				// pixels (e.g. yellow fishing bait) can fake short digits.
+				var best = "";
+				for (var c = 0; c < cols.length; c++) {
+					var chr = OCR.findChar(buf, font, cols[c], 0, 6, buf.width - 10, buf.height - 12);
+					if (!chr) continue;
+					var r = OCR.readLine(buf, font, cols[c], chr.x, chr.y, true, true);
+					var digits = r && r.text ? r.text.replace(/[^0-9]/g, "") : "";
+					if (digits.length > best.length) best = digits;
+				}
+				return best;
 			}
-			return null;
+			// Pass 1: the strip strictly above the icon, where the number
+			// lives — this keeps the icon's own pixels out of the read.
+			var d = tryRead(imgref.toData(Math.max(0, pos.x - 24), Math.max(0, pos.y - 26), 84, 30));
+			// Pass 2 (fallback): a taller region in case the icon is
+			// trimmed low in its slot.
+			if (!d) d = tryRead(imgref.toData(Math.max(0, pos.x - 24), Math.max(0, pos.y - 26), 84, 44));
+			return d ? parseInt(d, 10) : null;
 		} catch (e) {
 			return null;
 		}
@@ -1241,7 +1374,11 @@
 					}
 				}
 			});
-			status.textContent = okCount + "/" + total + " requirements met (backpack must be open and visible).";
+			var collected = 0;
+			items.forEach(function (it) { if (itemChecked(it.name)) collected++; });
+			status.textContent = collected + "/" + items.length + " collected (" + okCount +
+				" confirmed by scan" + (collected > okCount ? ", " + (collected - okCount) + " ticked manually" : "") +
+				"). Backpack must be open and visible.";
 		});
 	}
 
@@ -1468,6 +1605,15 @@
 			var count = el("span", "scan-count");
 			count.setAttribute("data-scan-count", i);
 			li.appendChild(count);
+			var infoChip = el("a", "chip chip-info", "ℹ");
+			infoChip.href = "#";
+			infoChip.title = "How to get this item (wiki summary)";
+			infoChip.addEventListener("click", function (e) {
+				e.preventDefault();
+				e.stopPropagation();
+				showItemInfo(it.name);
+			});
+			li.appendChild(infoChip);
 			// Manual tick as a failsafe for anything the scanner gets wrong.
 			li.addEventListener("click", function () {
 				var now = !itemChecked(it.name);
@@ -1774,6 +1920,12 @@
 
 		document.getElementById("map-close").addEventListener("click", hideMapPanel);
 		document.getElementById("btn-scan").addEventListener("click", scanBackpack);
+		document.getElementById("item-popup-close").addEventListener("click", function () {
+			document.getElementById("item-popup").classList.add("hidden");
+		});
+		document.getElementById("item-popup").addEventListener("click", function (e) {
+			if (e.target === this) this.classList.add("hidden");
+		});
 
 		var overlayPos = document.getElementById("overlay-pos");
 		overlayPos.value = prefs.overlayPos || "tc";
@@ -1841,6 +1993,8 @@
 			return img;
 		},
 		parseQuestDetails: parseQuestDetails,
+		parseRecipe: parseRecipe,
+		parseShopRows: parseShopRows,
 		fetchRuneMetrics: fetchRuneMetrics,
 		setAuto: function (v) { autoAdvance = v; }
 	};

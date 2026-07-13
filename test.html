@@ -168,6 +168,21 @@
 			document.getElementById("results").textContent += "\nLIVE rm sync FAILED: " + msg;
 		});
 
+		// Item info: recipe and shop-table parsing.
+		var rec = window.__rs3qh.parseRecipe(
+			"{{Infobox Recipe\n|skill1 = Herblore\n|skill1lvl = 5\n|mat1 = Marrentill potion (unf)\n|mat2 = Unicorn horn dust\n|mat2quantity = 1\n|output1 = Antipoison (3)\n}}"
+		);
+		check("recipe: materials", !!rec && rec.mats.length === 2 && rec.mats[0] === "1× Marrentill potion (unf)");
+		check("recipe: skill+level", rec.skill === "Herblore" && rec.level === "5");
+		check("recipe: absent -> null", window.__rs3qh.parseRecipe("nothing here") === null);
+
+		var shops = window.__rs3qh.parseShopRows(
+			"<div><table><tr><th>Seller</th><th>Location</th><th>Cost</th></tr>" +
+			"<tr><td>Obli's General Store</td><td>Shilo Village</td><td>45</td></tr>" +
+			"<tr><td>Karamja General Store</td><td>Musa Point</td><td>45</td></tr></table></div>"
+		);
+		check("shops: rows parsed", shops.length === 2 && shops[0] === "Obli's General Store — Shilo Village — 45");
+
 		// Overlay card renders with content (non-empty pixels, sane size).
 		var card = window.__rs3qh.testOverlayCard();
 		var painted = 0;
