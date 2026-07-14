@@ -246,6 +246,22 @@
 		check("number chain: never counts toward required conversations",
 			window.__rs3qh.countMatchedCandidates("1 / 1 / 1 / 4", chainOpts) === 0);
 
+		// A text candidate names ONE option: only the best-scoring match is
+		// boxed, so near-misses sharing common words don't light up too
+		// (Carnillean Rising: "Can you help me?" must not also box
+		// "Can you go away?").
+		var goblinOpts = [
+			{ text: "Tell me about the old woman who came in earlier." },
+			{ text: "Can you go away?" },
+			{ text: "Can you help me?" },
+			{ text: "Excuse me now." }
+		];
+		var gm = window.__rs3qh.matchOptions("3 Can you help me? / 3 Here, you can have this armour. / 1 Patrolling guards", goblinOpts, 0);
+		check("best match: exactly one box on the goblin screen", gm.length === 1);
+		check("best match: it is \"Can you help me?\"", gm[0] === goblinOpts[2]);
+		check("best match: exact text beats token overlap",
+			window.__rs3qh.matchOptions("2 Can you go away?", goblinOpts, 0)[0] === goblinOpts[1]);
+
 		// Timeline order: tables in document order, first-cell links ranked,
 		// header rows and duplicates skipped.
 		var tl = window.__rs3qh.parseTimelineOrder(

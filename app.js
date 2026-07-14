@@ -1051,17 +1051,26 @@
 		return s.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
 	}
 
-	// Fuzzy option-text comparison: substring either way, or most of the
-	// candidate's meaningful words appear in the option (OCR drops chars).
-	function optTextMatches(cand, optText) {
-		if (!cand || !optText) return false;
-		if (optText.indexOf(cand) !== -1 || cand.indexOf(optText) !== -1) return true;
+	// Fuzzy option-text comparison, scored: exact text beats a substring
+	// match beats token overlap (>=60% of the candidate's meaningful words,
+	// tolerating OCR-dropped characters); 0 means no match. Scoring matters
+	// because similar options ("Can you go away?" / "Can you help me?") can
+	// both clear the overlap threshold — the caller must prefer the best.
+	function optTextScore(cand, optText) {
+		if (!cand || !optText) return 0;
+		if (cand === optText) return 3;
+		if (optText.indexOf(cand) !== -1 || cand.indexOf(optText) !== -1) return 2;
 		var ctoks = cand.split(" ").filter(function (t) { return t.length > 2; });
-		if (ctoks.length < 2) return false;
+		if (ctoks.length < 2) return 0;
 		var otoks = optText.split(" ");
 		var hit = 0;
 		ctoks.forEach(function (t) { if (otoks.indexOf(t) !== -1) hit++; });
-		return hit / ctoks.length >= 0.6;
+		var frac = hit / ctoks.length;
+		return frac >= 0.6 ? frac : 0;
+	}
+
+	function optTextMatches(cand, optText) {
+		return optTextScore(cand, optText) > 0;
 	}
 
 	// The step's chat field looks like "1 Talk about the quest. / Any" —
@@ -1098,9 +1107,15 @@
 			var textPart = normOpt(numMatch ? numMatch[2] : cand);
 
 			if (textPart.length >= 3) {
+				// A candidate names ONE option — take the best-scoring
+				// match only, so near-misses ("Can you go away?" vs
+				// "Can you help me?") don't get boxed alongside it.
+				var best = null, bestScore = 0;
 				opts.forEach(function (o) {
-					if (optTextMatches(textPart, normOpt(o.text || ""))) add(o);
+					var s = optTextScore(textPart, normOpt(o.text || ""));
+					if (s > bestScore) { bestScore = s; best = o; }
 				});
+				if (best) add(best);
 			} else if (num !== null && num >= 1 && num <= opts.length) {
 				add(opts[num - 1]);
 			}
