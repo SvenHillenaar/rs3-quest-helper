@@ -529,8 +529,9 @@ main {
 	padding: 5px 9px;
 }
 
-/* Right-hand footer group: overlay + placement + settings + reset. */
-#btn-overlay { margin-left: auto; }
+/* The footer wraps at narrow widths, so only the last pair is pinned
+   right — settings + reset stay in the bottom-right corner on any size. */
+#btn-settings-guide { margin-left: auto; }
 
 .settings-row {
 	display: flex;
