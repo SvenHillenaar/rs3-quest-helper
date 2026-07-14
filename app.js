@@ -145,9 +145,11 @@
 				errcb("The wiki returned no guide for this quest.");
 				return;
 			}
-			var parsed = parseQuickGuide(data.parse.wikitext["*"]);
+			var parsed = title === PATHWAY_TITLE
+				? parsePathwayGuide(data.parse.wikitext["*"])
+				: parseQuickGuide(data.parse.wikitext["*"]);
 			parsed.title = title;
-			parsed.name = title.replace(/\/Quick guide$/, "");
+			parsed.name = guideDisplayName(title);
 			cache[title] = { ts: Date.now(), data: parsed };
 			pruneGuideCache(cache);
 			store(GUIDE_CACHE_KEY, cache);
@@ -736,6 +738,92 @@
 		// Drop sections that ended up with no steps and no info.
 		sections = sections.filter(function (s) { return s.steps.length || s.needed.length || s.images.length; });
 		return { sections: sections };
+	}
+
+	// ---------- Efficient Ironman Pathway (special guide) ----------
+	// The pathway page is not a quick guide: its steps are rows of
+	// "static-row-header-step" wikitables (Activity | Notes | Level) under
+	// the Part 1..6 headings. Parse those rows into checkable steps; the
+	// Miniguides half of the page and non-step tables are skipped.
+
+	var PATHWAY_TITLE = "Ironman Mode/Guide/Efficient Ironman Pathway Guide";
+
+	function parsePathwayGuide(wikitext) {
+		var main = wikitext.split(/\n=\s*Miniguides\s*=/)[0];
+		var sections = [];
+		var current = null;
+
+		function cellParse(raw) {
+			// MediaWiki cell attributes: "| style=... | content".
+			var idx = raw.indexOf("|");
+			if (idx !== -1) {
+				var pre = raw.slice(0, idx);
+				if (/=\s*"/.test(pre) && pre.indexOf("[[") === -1) raw = raw.slice(idx + 1);
+			}
+			// Bullet lists inside a cell read as "•"-separated sentences.
+			raw = raw.replace(/^[ \t]*[*#;:]+[ \t]*/gm, "• ");
+			var r = extractChat(cleanMarkup(resolveTemplates(raw)));
+			r.text = (r.text || "").replace(/\s+/g, " ").replace(/^•\s*/, "").trim();
+			return r;
+		}
+
+		var lines = main.split("\n");
+		for (var i = 0; i < lines.length; i++) {
+			var trimmed = lines[i].trim();
+			var h = /^==\s*(.*?)\s*==$/.exec(trimmed);
+			if (h && h[1].charAt(0) !== "=") {
+				current = { title: extractChat(cleanMarkup(h[1])).text, needed: [], steps: [], images: [] };
+				sections.push(current);
+				continue;
+			}
+			if (!current || !/^\{\|.*static-row-header-step/.test(trimmed)) continue;
+
+			// Collect this step table and split it into rows.
+			var tl = [];
+			for (i++; i < lines.length && !/^\|\}/.test(lines[i].trim()); i++) tl.push(lines[i]);
+			var rows = [], cur = null;
+			tl.forEach(function (l) {
+				if (/^\|-/.test(l.trim())) { if (cur) rows.push(cur); cur = []; }
+				else if (cur) cur.push(l);
+			});
+			if (cur) rows.push(cur);
+
+			rows.forEach(function (r) {
+				var cells = [];
+				r.forEach(function (l) {
+					var t = l.trim();
+					if (/^!/.test(t)) return;
+					if (/^\|/.test(t)) {
+						t.slice(1).split("||").forEach(function (c) { cells.push(c); });
+					} else if (cells.length) {
+						cells[cells.length - 1] += "\n" + l;
+					}
+				});
+				if (!cells.length) return;
+				var act = cellParse(cells[0] || "");
+				if (!act.text && !act.links.length) return;
+				var note = cellParse(cells[1] || "");
+				var lvl = cellParse(cells[2] || "").text;
+				var noteText = note.text && !/^(n\/?a|-|none)$/i.test(note.text) ? note.text : "";
+				if (lvl && !/^(n\/?a|-|none)$/i.test(lvl)) {
+					noteText = (noteText ? noteText + " " : "") + "[Level: " + lvl + "]";
+				}
+				current.steps.push({
+					text: act.text,
+					chat: act.chat || null,
+					maps: act.maps.concat(note.maps),
+					images: act.images.concat(note.images),
+					links: act.links.concat(note.links),
+					note: noteText || undefined,
+					sub: []
+				});
+			});
+		}
+		return { sections: sections.filter(function (s) { return s.steps.length; }) };
+	}
+
+	function guideDisplayName(title) {
+		return title === PATHWAY_TITLE ? "Efficient Ironman Pathway" : title.replace(/\/Quick guide$/, "");
 	}
 
 	// Extract the {{Quest details}} items/recommended lists from a quest's
@@ -2014,6 +2102,17 @@
 			if (!info.image && !info.intro) {
 				body.appendChild(el("p", null, "No summary available — use the full wiki page link above."));
 			}
+			// A linked quest name gets a direct jump into its guide — this is
+			// what makes quest mentions in the Ironman pathway interactive.
+			var q = questIndex.find(function (x) { return normName(x.name) === normName(page); });
+			if (q) {
+				var jump = el("button", "open-quest-btn", "Open quest in helper ▶");
+				jump.addEventListener("click", function () {
+					popup.classList.add("hidden");
+					openQuest(q.title);
+				});
+				body.appendChild(jump);
+			}
 		}
 
 		if (entityInfoCache[page]) { render(entityInfoCache[page]); return; }
@@ -2119,6 +2218,16 @@
 		main.innerHTML = "";
 		var shown = 0, hidden = 0;
 		var rankMap = activeRank();
+		// Pinned special guide: the wiki's Efficient Ironman Pathway,
+		// browsable/checkable like a quest but not part of the quest index.
+		if ("efficient ironman pathway".indexOf(filter) !== -1) {
+			var prow = el("div", "quest-row pathway-row");
+			if (rankMap) prow.appendChild(el("span", "quest-rank", "★"));
+			prow.appendChild(el("span", "quest-name", "Efficient Ironman Pathway"));
+			prow.appendChild(el("span", "quest-status", "guide"));
+			prow.addEventListener("click", function () { openQuest(PATHWAY_TITLE); });
+			main.appendChild(prow);
+		}
 		sortedIndex().forEach(function (q) {
 			if (filter && q.name.toLowerCase().indexOf(filter) === -1) return;
 			var status = questStatus(q);
@@ -2326,7 +2435,7 @@
 		currentQuestTitle = title;
 		show("view-home", false);
 		show("view-guide", true);
-		document.getElementById("guide-title").textContent = title.replace(/\/Quick guide$/, "");
+		document.getElementById("guide-title").textContent = guideDisplayName(title);
 		document.getElementById("steps").innerHTML = "";
 		document.getElementById("quest-info").innerHTML = "";
 		show("items-panel", false);
@@ -2715,6 +2824,7 @@
 					if (q.name.toLowerCase() === name.toLowerCase() || q.title.toLowerCase() === name.toLowerCase()) match = q;
 				});
 				if (match) openQuest(match.title);
+				else if (name.toLowerCase() === PATHWAY_TITLE.toLowerCase() || /^pathway$/i.test(name)) openQuest(PATHWAY_TITLE);
 			}
 		}, function (msg) {
 			setStatus("index-status", msg + " — check your connection and reload.");
@@ -2751,6 +2861,7 @@
 		questLockNote: questLockNote,
 		locationLockNote: locationLockNote,
 		fetchRuneMetrics: fetchRuneMetrics,
+		parsePathwayGuide: parsePathwayGuide,
 		floorText: floorText,
 		floorPrefForLocale: floorPrefForLocale,
 		setFloorPref: function (v) { prefs.floors = v; },

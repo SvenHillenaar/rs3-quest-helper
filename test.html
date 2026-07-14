@@ -289,6 +289,44 @@
 				return (s.text + " " + (s.note || "")).indexOf(".png") === -1;
 			}));
 
+		// Efficient Ironman Pathway: steps come from static-row-header-step
+		// table rows (Activity | Notes | Level); other tables and the
+		// Miniguides half are skipped.
+		var pw = window.__rs3qh.parsePathwayGuide(
+			"=Main guide=\n==Part 1: Starting off==\nIntro prose here.\n" +
+			"{| class=\"wikitable lighttable\"\n! Order !! Task\n|-\n|1\n|[[Nemi Forest]]\n|}\n" +
+			"{|class=\"wikitable static-row-numbers static-row-header-step \" data-tableid=\"EIP1\"\n" +
+			"! style=\"width:45%;\" | Activity !! Notes !! Level\n" +
+			"|- data-rowid = \"Tutorial Island\"\n| Skip Tutorial Island \n| {{NA}}\n| {{NA}}\n" +
+			"|-\n| Complete [[Cook's Assistant]] {{Chat options|1 Yes.}}\n| Save an [[unfired bowl]]\n| 10 [[Cooking]]\n|}\n" +
+			"==Part 2: Combat==\n{|class=\"wikitable static-row-header-step\"\n! A !! N !! L\n|-\n| Another step\n|\n|\n|}\n" +
+			"\n= Miniguides =\n==Dailies==\n{|class=\"wikitable static-row-header-step\"\n|-\n| Should not appear\n|\n|\n|}\n"
+		);
+		check("pathway: two sections, miniguides cut", pw.sections.length === 2 && pw.sections[1].steps.length === 1);
+		check("pathway: non-step table skipped", pw.sections[0].steps.length === 2);
+		check("pathway: plain row", pw.sections[0].steps[0].text === "Skip Tutorial Island" && !pw.sections[0].steps[0].note);
+		var pws = pw.sections[0].steps[1];
+		check("pathway: activity text + chat", pws.text === "Complete Cook's Assistant" && pws.chat === "1 Yes.");
+		check("pathway: links from activity and notes",
+			pws.links.some(function (l) { return l.page === "Cook's Assistant"; }) &&
+			pws.links.some(function (l) { return l.page === "unfired bowl"; }));
+		check("pathway: note keeps notes + level", pws.note === "Save an unfired bowl [Level: 10 Cooking]");
+
+		// Live: the real pathway page parses into hundreds of steps.
+		fetch("https://runescape.wiki/api.php?action=parse&page=Ironman_Mode%2FGuide%2FEfficient_Ironman_Pathway_Guide&prop=wikitext&format=json&origin=*")
+			.then(function (r) { return r.json(); })
+			.then(function (d) {
+				var g = window.__rs3qh.parsePathwayGuide(d.parse.wikitext["*"]);
+				var n = 0;
+				g.sections.forEach(function (s) { n += s.steps.length; });
+				document.getElementById("results").textContent +=
+					"\nLIVE pathway OK: " + g.sections.length + " sections, " + n + " steps" +
+					(n < 250 ? " (WARNING: fewer than expected)" : "");
+			})
+			.catch(function (e) {
+				document.getElementById("results").textContent += "\nLIVE pathway FAILED: " + e.message;
+			});
+
 		// Timeline order: tables in document order, first-cell links ranked,
 		// header rows and duplicates skipped.
 		var tl = window.__rs3qh.parseTimelineOrder(

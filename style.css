@@ -215,6 +215,15 @@ header {
 
 .quest-row:hover { border-color: var(--gold); }
 
+.pathway-row { border-color: var(--info-border); }
+.pathway-row .quest-status { color: var(--gold); border-color: var(--info-border); }
+
+.open-quest-btn {
+	display: block;
+	clear: both;
+	margin-top: 8px;
+}
+
 .quest-name { flex: 1; }
 
 .quest-progress {
