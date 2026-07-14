@@ -258,6 +258,34 @@
 		pc.getContext("2d").putImageData(card, 0, 0);
 		document.body.insertBefore(pc, document.getElementById("results"));
 
+		// Assist highlight sprite: rounded glowing pill, cached per size,
+		// pre-encoded for alt1.overLayImage.
+		var sp = window.__rs3qh.highlightSprite(280, 32);
+		check("highlight sprite: size kept", sp.w === 280 && sp.h === 32);
+		check("highlight sprite: encoded string", typeof sp.str === "string" && sp.str.length > 100);
+		check("highlight sprite: cached by size", window.__rs3qh.highlightSprite(280, 32) === sp);
+		check("highlight sprite: sizes independent", window.__rs3qh.highlightSprite(184, 32) !== sp);
+		// Border visible, centre translucent so the option text stays readable.
+		var d = sp.data.data;
+		function alphaAt(x, y) { return d[(y * sp.w + x) * 4 + 3]; }
+		check("highlight sprite: border drawn", alphaAt(140, 4) > 120);
+		check("highlight sprite: centre translucent", alphaAt(140, 16) < 90);
+		check("highlight sprite: chevron drawn", alphaAt(16, 16) > 150);
+		check("highlight sprite: glow corners transparent", alphaAt(0, 0) === 0 && alphaAt(sp.w - 1, sp.h - 1) === 0);
+		// Visual preview: the sprite composited over a mock dialogue option row.
+		var prev = document.createElement("canvas");
+		prev.width = 300; prev.height = 44;
+		prev.style.margin = "10px";
+		var pg = prev.getContext("2d");
+		pg.fillStyle = "#c7b9a1"; pg.fillRect(0, 0, 300, 44);
+		pg.fillStyle = "#3f2d20"; pg.font = "14px monospace";
+		pg.fillText("1. Yes, I will help you.", 34, 26);
+		var spc = document.createElement("canvas");
+		spc.width = sp.w; spc.height = sp.h;
+		spc.getContext("2d").putImageData(sp.data, 0, 0);
+		pg.drawImage(spc, 10, 6);
+		document.body.insertBefore(prev, document.getElementById("results"));
+
 		// Wiki links preserved through parsing for clickable names.
 		var g4 = window.__rs3qh.parseQuickGuide(
 			"==S==\n{{Checklist|\n* Talk to [[Dororan]] near [[Barbarian Village|the village]]. {{Chat options|1 Hi.}}\n** Then see [[Gudrun]].\n}}\n"

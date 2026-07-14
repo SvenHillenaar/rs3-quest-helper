@@ -847,9 +847,16 @@
 	// the current step's chat options. The chatbox is watched for quest
 	// completion messages.
 
-	var ASSIST_INTERVAL_MS = 700;
+	// Fast ticks keep the highlight responsive (it expires ~600ms after the
+	// dialogue changes); conversation tracking still samples at the original
+	// 700ms cadence via CONVO_EVERY so its tick-count thresholds keep the
+	// same wall-clock meaning.
+	var ASSIST_INTERVAL_MS = 350;
+	var CONVO_EVERY = 2;
+	var CHAT_EVERY = 4;
 	var AUTO_KEY = "rs3qh-auto-v1";
 	var assistTimer = null;
+	var assistTickN = 0;
 	var dialogReader = null;
 	var chatReader = null;
 	var chatFound = false;
@@ -1010,11 +1017,67 @@
 		} catch (e) { /* ignore */ }
 	}
 
+	// Rounded, glowing highlight pill rendered once per size and cached as an
+	// Alt1-encoded image string. The translucent fill tints the option without
+	// hiding its text; the chevron marks it as "pick this one".
+	var hlSpriteCache = {};
+	function highlightSprite(w, h) {
+		var key = w + "x" + h;
+		if (hlSpriteCache[key]) return hlSpriteCache[key];
+		var cv = document.createElement("canvas");
+		cv.width = w; cv.height = h;
+		var ctx = cv.getContext("2d");
+		function pill(inset) {
+			var r = Math.min(10, (h - inset * 2) / 2);
+			var x0 = inset, y0 = inset, x1 = w - inset, y1 = h - inset;
+			ctx.beginPath();
+			ctx.moveTo(x0 + r, y0);
+			ctx.arcTo(x1, y0, x1, y1, r);
+			ctx.arcTo(x1, y1, x0, y1, r);
+			ctx.arcTo(x0, y1, x0, y0, r);
+			ctx.arcTo(x0, y0, x1, y0, r);
+			ctx.closePath();
+		}
+		// Soft outer glow behind the border.
+		ctx.save();
+		ctx.shadowColor = "rgba(141, 255, 90, 0.9)";
+		ctx.shadowBlur = 5;
+		pill(4);
+		ctx.strokeStyle = "rgba(141, 255, 90, 0.95)";
+		ctx.lineWidth = 2;
+		ctx.stroke();
+		ctx.restore();
+		// Translucent gradient fill — keeps the option text readable.
+		var g = ctx.createLinearGradient(0, 0, 0, h);
+		g.addColorStop(0, "rgba(141, 255, 90, 0.20)");
+		g.addColorStop(1, "rgba(141, 255, 90, 0.05)");
+		pill(5);
+		ctx.fillStyle = g;
+		ctx.fill();
+		// Chevron on the left edge.
+		ctx.strokeStyle = "rgba(180, 255, 140, 0.95)";
+		ctx.lineWidth = 2.5;
+		ctx.lineCap = "round";
+		ctx.lineJoin = "round";
+		ctx.beginPath();
+		ctx.moveTo(11, h / 2 - 5);
+		ctx.lineTo(16, h / 2);
+		ctx.lineTo(11, h / 2 + 5);
+		ctx.stroke();
+		var data = ctx.getImageData(0, 0, w, h);
+		hlSpriteCache[key] = { str: A1lib.encodeImageString(data), w: w, h: h, data: data };
+		return hlSpriteCache[key];
+	}
+
 	function drawOptionBoxes(matches, dialogPos) {
 		try {
 			alt1.overLaySetGroup("rs3qh-assist");
 			alt1.overLayFreezeGroup("rs3qh-assist");
 			alt1.overLayClearGroup("rs3qh-assist");
+			// Short-lived boxes: if the dialogue changes and the next tick
+			// doesn't reconfirm them, they expire on their own instead of
+			// lingering over whatever replaced the options.
+			var ttl = ASSIST_INTERVAL_MS + 250;
 			matches.forEach(function (o) {
 				// The reader's per-option width measurement is unreliable on
 				// the current RS3 dialogue skin, so size the box from the
@@ -1033,11 +1096,17 @@
 					x = (o.buttonx || o.x - 4) - 2;
 					w = Math.max(textw, 260);
 				}
-				alt1.overLayRect(
-					mixColor(127, 255, 80),
-					x, o.y - 9, w, 24,
-					ASSIST_INTERVAL_MS + 400, 2
-				);
+				try {
+					// Sprite bounds extend ~4px past the old rect so the
+					// border lands in the same place with glow around it.
+					// Width snaps to 8px steps so the size cache stays small.
+					var sw = Math.ceil((w + 10) / 8) * 8;
+					var sp = highlightSprite(sw, 32);
+					alt1.overLayImage(x - 5, o.y - 13, sp.str, sp.w, ttl);
+				} catch (e2) {
+					// Image overlays unavailable — plain rect fallback.
+					alt1.overLayRect(mixColor(127, 255, 80), x, o.y - 9, w, 24, ttl, 2);
+				}
 			});
 			alt1.overLayRefreshGroup("rs3qh-assist");
 		} catch (e) { /* overlay unavailable */ }
@@ -1060,6 +1129,7 @@
 	function assistTick() {
 		if (!guide) { setAssistStatus(""); return; }
 		if (alt1.rsLinked === false) { clearAssistOverlay(); return; }
+		assistTickN++;
 		var img;
 		try {
 			img = A1lib.captureHoldFullRs();
@@ -1068,9 +1138,9 @@
 			return;
 		}
 
-		// Watch the chatbox for quest completion.
+		// Watch the chatbox for quest completion (heavier OCR — every 4th tick).
 		try {
-			if (chatReader) {
+			if (chatReader && assistTickN % CHAT_EVERY === 0) {
 				if (!chatFound) {
 					var boxes = chatReader.find(img);
 					chatFound = !!(boxes && boxes.length);
@@ -1126,7 +1196,9 @@
 
 			// Auto-tick only with evidence: the conversation that just
 			// ended must have shown one of this step's expected options.
-			if (autoAdvance) {
+			// Sampled every 2nd tick so convoObserve's seen/gone tick
+			// thresholds keep their original 700ms-cadence timing.
+			if (autoAdvance && assistTickN % CONVO_EVERY === 0) {
 				var candCount = 0;
 				if (matchedTarget && matchedTarget.subIndex === null && dlg && dlg.opts) {
 					candCount = countMatchedCandidates(matchedTarget.chat, dlg.opts);
@@ -1190,6 +1262,7 @@
 			chatFound = false;
 			convo.key = null;
 			convo.evidence = null;
+			assistTickN = 0;
 			assistTimer = setInterval(assistTick, ASSIST_INTERVAL_MS);
 			assistTick();
 			btn.textContent = "Assist: on";
@@ -2318,6 +2391,7 @@
 		questLockNote: questLockNote,
 		locationLockNote: locationLockNote,
 		fetchRuneMetrics: fetchRuneMetrics,
+		highlightSprite: highlightSprite,
 		setAuto: function (v) { autoAdvance = v; }
 	};
 
