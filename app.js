@@ -1162,18 +1162,12 @@
 		chatField.split(" / ").forEach(function (cand) {
 			cand = cand.trim();
 			if (/^any$/i.test(cand)) return;
-			var numMatch = /^(\d)[.)]?\s*(.*)$/.exec(cand);
-			var textPart = normOpt(numMatch ? numMatch[2] : cand);
-			var matched = false;
-			if (textPart.length >= 3) {
-				opts.forEach(function (o) {
-					if (optTextMatches(textPart, normOpt(o.text || ""))) matched = true;
-				});
-			}
-			// Bare numbers never count: "1 / 1 / 1 / 4" is successive
-			// screens of ONE conversation, not options to try separately,
-			// so they must not raise the conversations-required count.
-			if (matched) n++;
+			// Only text candidates whose number also agrees with the matched
+			// option's position count. Bare numbers never do: "1 / 1 / 1 / 4"
+			// is successive screens of ONE conversation, not options to try
+			// separately, so they must not raise the conversations-required
+			// count — and neither may chain remnants for later screens.
+			if (bestOptionFor(cand, opts)) n++;
 		});
 		return n;
 	}
@@ -1193,6 +1187,11 @@
 	// tolerating OCR-dropped characters); 0 means no match. Scoring matters
 	// because similar options ("Can you go away?" / "Can you help me?") can
 	// both clear the overlap threshold — the caller must prefer the best.
+	// Words too common to signal WHICH option is meant — "Ariane says the
+	// tower is in danger" must not fuzzy-match "Why won't you let Ariane
+	// into the tower?" off shared filler words.
+	var OPT_STOPWORDS = " the you your are and not for with into what that this will its ";
+
 	function optTextScore(cand, optText) {
 		if (!cand || !optText) return 0;
 		if (cand === optText) return 3;
@@ -1200,7 +1199,9 @@
 		// char OCR fragment appearing inside the candidate is noise.
 		if (cand.length >= 3 && optText.length >= 3 &&
 			(optText.indexOf(cand) !== -1 || cand.indexOf(optText) !== -1)) return 2;
-		var ctoks = cand.split(" ").filter(function (t) { return t.length > 2; });
+		var ctoks = cand.split(" ").filter(function (t) {
+			return t.length > 2 && OPT_STOPWORDS.indexOf(" " + t + " ") === -1;
+		});
 		if (ctoks.length < 2) return 0;
 		var otoks = optText.split(" ");
 		var hit = 0;
@@ -1209,8 +1210,25 @@
 		return frac >= 0.6 ? frac : 0;
 	}
 
-	function optTextMatches(cand, optText) {
-		return optTextScore(cand, optText) > 0;
+	// Best on-screen option for one TEXT chat candidate, or null. A
+	// candidate that carries a number must also LAND on that number: in
+	// chains ("3 Ariane says... / 3 What are you going to do? / 4
+	// Goodbye.") the number is the option's position on its OWN screen, so
+	// a text match sitting at a different position (Goodbye at 5, not 4)
+	// belongs to a later screen and must stay silent.
+	function bestOptionFor(cand, opts) {
+		var numMatch = /^(\d)[.)]?\s*(.*)$/.exec(cand);
+		var num = numMatch ? +numMatch[1] : null;
+		var textPart = normOpt(numMatch ? numMatch[2] : cand);
+		if (textPart.length < 3) return null;
+		var best = null, bestScore = 0, bestIdx = -1;
+		opts.forEach(function (o, i) {
+			var s = optTextScore(textPart, normOpt(o.text || ""));
+			if (s > bestScore) { bestScore = s; best = o; bestIdx = i; }
+		});
+		if (!best) return null;
+		if (num !== null && bestIdx + 1 !== num) return null;
+		return best;
 	}
 
 	// The step's chat field looks like "1 Talk about the quest. / Any" —
@@ -1242,22 +1260,20 @@
 				hasAny = true;
 				return;
 			}
+			// A candidate names ONE option — the best-scoring match, and
+			// only when its number (if any) agrees with the option's
+			// on-screen position (bestOptionFor).
+			var best = bestOptionFor(cand, opts);
+			if (best) {
+				add(best);
+				return;
+			}
+			// Number fallback only when the candidate is (near-)bare — a
+			// number with real text must match that text or stay silent.
 			var numMatch = /^(\d)[.)]?\s*(.*)$/.exec(cand);
-			var num = numMatch ? +numMatch[1] : null;
-			var textPart = normOpt(numMatch ? numMatch[2] : cand);
-
-			if (textPart.length >= 3) {
-				// A candidate names ONE option — take the best-scoring
-				// match only, so near-misses ("Can you go away?" vs
-				// "Can you help me?") don't get boxed alongside it.
-				var best = null, bestScore = 0;
-				opts.forEach(function (o) {
-					var s = optTextScore(textPart, normOpt(o.text || ""));
-					if (s > bestScore) { bestScore = s; best = o; }
-				});
-				if (best) add(best);
-			} else if (num !== null && num >= 1 && num <= opts.length) {
-				add(opts[num - 1]);
+			if (numMatch && normOpt(numMatch[2]).length < 3) {
+				var num = +numMatch[1];
+				if (num >= 1 && num <= opts.length) add(opts[num - 1]);
 			}
 		});
 		// "Any" only means "every option works" when no specific candidate

@@ -272,6 +272,29 @@
 		check("any-fallback: matcher still returns all for evidence",
 			window.__rs3qh.matchOptions("1 No such text here / Any", fourOpts, 0).length === 4);
 
+		// Chain candidates carry their own screen's option number: a text
+		// match at a different position belongs to a later screen and stays
+		// silent (Rune Mysteries: "4 Goodbye." must not box Goodbye at #5,
+		// and "3 Ariane says..." must not fuzzy-claim option 2 off filler
+		// words like "the"/"ariane"/"tower").
+		var sedridorOpts = [
+			{ text: "Don't you believe her?" },
+			{ text: "Why won't you let Ariane into the tower?" },
+			{ text: "What are you going to do?" },
+			{ text: "Other questions…" },
+			{ text: "Goodbye." }
+		];
+		var sedChat = "3 Ariane says the tower is in danger. / 3 What are you going to do? / 4 Goodbye.";
+		var sed = window.__rs3qh.matchOptions(sedChat, sedridorOpts, 1);
+		check("chain: only the current screen's option boxed", sed.length === 1 && sed[0] === sedridorOpts[2]);
+		check("chain: number-position agreement required",
+			window.__rs3qh.matchOptions("4 Goodbye.", sedridorOpts, 0).length === 0 &&
+			window.__rs3qh.matchOptions("5 Goodbye.", sedridorOpts, 0)[0] === sedridorOpts[4]);
+		check("chain: stopwords don't fuzzy-claim similar options",
+			window.__rs3qh.matchOptions("Ariane says the tower is in danger.", sedridorOpts, 0).length === 0);
+		check("chain: remnants don't inflate required conversations",
+			window.__rs3qh.countMatchedCandidates(sedChat, sedridorOpts) === 1);
+
 		// A text candidate names ONE option: only the best-scoring match is
 		// boxed, so near-misses sharing common words don't light up too
 		// (Carnillean Rising: "Can you help me?" must not also box
