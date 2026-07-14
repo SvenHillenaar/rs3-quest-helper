@@ -862,17 +862,37 @@
 	// during the conversation (the evidence) — otherwise unrelated
 	// dialogues (cutscenes, eavesdropping, other NPCs) would tick steps
 	// whose dialogue never happened.
-	var convo = { key: null, seen: 0, gone: 0, evidence: null };
+	//
+	// Steps like "1 Convince / 2 Persuade / 3 Threaten" list several
+	// options on the SAME screen that must each be tried in separate
+	// conversations — when several candidates match one screen at once,
+	// that many evidenced conversations are required before the step
+	// ticks.
+	var convo = { key: null, seen: 0, gone: 0, evidence: null, required: 1, completions: 0 };
 
 	// Returns null (nothing to do), { none: true } (a conversation ended
-	// but its options never matched — do not tick), or the evidence target
-	// { key, subIndex } to tick.
-	function convoObserve(key, dialogVisible, matchedTarget) {
-		if (convo.key !== key) { convo.key = key; convo.seen = 0; convo.gone = 0; convo.evidence = null; }
+	// but its options never matched — do not tick), { partial, required }
+	// (one of several required conversations done), or the evidence
+	// target { key, subIndex } to tick.
+	function convoObserve(key, dialogVisible, matchedTarget, candCount) {
+		if (convo.key !== key) {
+			convo.key = key;
+			convo.seen = 0;
+			convo.gone = 0;
+			convo.evidence = null;
+			convo.required = 1;
+			convo.completions = 0;
+		}
 		if (dialogVisible) {
 			convo.seen++;
 			convo.gone = 0;
-			if (matchedTarget) convo.evidence = matchedTarget;
+			if (matchedTarget) {
+				convo.evidence = matchedTarget;
+				if (candCount && (matchedTarget.subIndex === null || matchedTarget.subIndex === undefined) &&
+					candCount > convo.required) {
+					convo.required = candCount;
+				}
+			}
 			return null;
 		}
 		if (convo.seen >= 2) {
@@ -882,10 +902,38 @@
 				convo.gone = 0;
 				var ev = convo.evidence;
 				convo.evidence = null;
-				return ev && ev.key === key ? ev : { none: true };
+				if (!ev || ev.key !== key) return { none: true };
+				// Sub-steps are granular already — tick directly.
+				if (ev.subIndex !== null && ev.subIndex !== undefined) return ev;
+				convo.completions++;
+				if (convo.completions >= convo.required) return ev;
+				return { partial: convo.completions, required: convo.required };
 			}
 		}
 		return null;
+	}
+
+	// How many distinct chat candidates of this step match the current
+	// options screen (multiple at once = "try each of these").
+	function countMatchedCandidates(chatField, opts) {
+		var n = 0;
+		chatField.split(" / ").forEach(function (cand) {
+			cand = cand.trim();
+			if (/^any$/i.test(cand)) return;
+			var numMatch = /^(\d)[.)]?\s*(.*)$/.exec(cand);
+			var num = numMatch ? +numMatch[1] : null;
+			var textPart = normOpt(numMatch ? numMatch[2] : cand);
+			var matched = false;
+			if (textPart.length >= 3) {
+				opts.forEach(function (o) {
+					if (optTextMatches(textPart, normOpt(o.text || ""))) matched = true;
+				});
+			} else if (num !== null && num >= 1 && num <= opts.length) {
+				matched = true;
+			}
+			if (matched) n++;
+		});
+		return n;
 	}
 
 	function assistAvailable() {
@@ -1079,12 +1127,19 @@
 			// Auto-tick only with evidence: the conversation that just
 			// ended must have shown one of this step's expected options.
 			if (autoAdvance) {
+				var candCount = 0;
+				if (matchedTarget && matchedTarget.subIndex === null && dlg && dlg.opts) {
+					candCount = countMatchedCandidates(matchedTarget.chat, dlg.opts);
+				}
 				var res = convoObserve(stepKey(step), !!pos,
-					matchedTarget ? { key: stepKey(step), subIndex: matchedTarget.subIndex } : null);
+					matchedTarget ? { key: stepKey(step), subIndex: matchedTarget.subIndex } : null, candCount);
 				if (res) {
 					clearAssistOverlay();
 					if (res.none) {
 						setAssistStatus("Assist: a conversation ended, but this step's options never appeared — not ticked (tick manually if it was the right one).");
+					} else if (res.partial) {
+						setAssistStatus("Assist: conversation done — " + res.partial + "/" + res.required +
+							" of this step's dialogue options completed. Talk again for the next one.");
 					} else if (res.subIndex !== null && res.subIndex !== undefined) {
 						setSubDone(step, res.subIndex, true);
 						setAssistStatus("Assist: conversation finished — sub-step ticked automatically.");
@@ -2238,6 +2293,7 @@
 		matchOptions: matchOptions,
 		parseQuickGuide: parseQuickGuide,
 		convoObserve: convoObserve,
+		countMatchedCandidates: countMatchedCandidates,
 		normName: normName,
 		parseRmPayload: parseRmPayload,
 		testOverlayCard: function () {

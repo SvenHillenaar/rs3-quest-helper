@@ -149,6 +149,28 @@
 		res = co("s6", false, null);
 		check("convo: evidence does not leak across steps", !!res && res.none === true);
 
+		// SOUL SEARCHING PATTERN: three candidates match the same screen ->
+		// three evidenced conversations required before the step ticks.
+		var ssOpts = [{ text: "Convince" }, { text: "Persuade." }, { text: "Threaten." }];
+		var cmc = window.__rs3qh.countMatchedCandidates("1 Convince / 2 Persuade. / 3 Threaten.", ssOpts);
+		check("multi: three candidates on one screen", cmc === 3);
+		function convoCycle(k, count) {
+			co(k, true, ev(k), count); co(k, true, ev(k), count);
+			co(k, false, null, 0); co(k, false, null, 0);
+			return co(k, false, null, 0);
+		}
+		res = convoCycle("m1", 3);
+		check("multi: first conversation is partial 1/3", !!res && res.partial === 1 && res.required === 3);
+		res = convoCycle("m1", 3);
+		check("multi: second is partial 2/3", !!res && res.partial === 2);
+		res = convoCycle("m1", 3);
+		check("multi: third ticks the step", !!res && !res.partial && !res.none && res.subIndex === null);
+
+		// Ordinary chained candidates (different screens) still tick after
+		// one conversation: only one candidate matches at a time.
+		res = convoCycle("m2", 1);
+		check("multi: single-match steps tick on first conversation", !!res && !res.partial && !res.none);
+
 		// Single-tick blip -> no end signal at all.
 		co("s7", true, ev("s7"));
 		advanced = false;
