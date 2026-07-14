@@ -190,6 +190,8 @@
 		check("norm: ampersand", nn("Heroes & Villains") === nn("Heroes and Villains"));
 		check("norm: case/spaces", nn("The  Blood Pact") === nn("the blood pact"));
 		check("norm: distinct quests stay distinct", nn("A Fairy Tale I - Growing Pains") !== nn("A Fairy Tale II - Cure a Queen"));
+		check("norm: (quest) disambiguator stripped", nn("Tears of Guthix (quest)") === nn("Tears of Guthix"));
+		check("norm: (miniquest) disambiguator stripped", nn("Enter the Abyss (miniquest)") === nn("Enter the Abyss"));
 
 		// RuneMetrics payload parsing (fetch and manual import share this).
 		var rm = window.__rs3qh.parseRmPayload;
@@ -292,11 +294,16 @@
 		check("timeline: duplicate keeps first rank", Object.keys(tl).length === 3);
 		check("timeline: no tables -> null", window.__rs3qh.parseTimelineOrder("<p>nothing</p>") === null);
 
-		// Live end-to-end: the real timeline page parses into a big ranking.
+		// Live end-to-end: the combined quests+miniquests timeline parses
+		// into a big ranking that includes miniquests.
 		window.__rs3qh.fetchTimelineOrder(function (rank) {
 			var n = Object.keys(rank).length;
+			var notes = [];
+			notes.push(rank[nn("Cook's Assistant")] === 0 ? "Cook's Assistant #1" : "WARNING: Cook's Assistant not first");
+			notes.push(rank[nn("Sheep Shearer (miniquest)")] !== undefined ? "miniquests included" : "WARNING: miniquests missing");
+			if (n < 300) notes.push("WARNING: only " + n + " entries");
 			document.getElementById("results").textContent +=
-				"\nLIVE timeline OK: " + n + " quests" + (rank[nn("Cook's Assistant")] === 0 ? " (Cook's Assistant #1)" : " (WARNING: Cook's Assistant not first)");
+				"\nLIVE timeline OK: " + n + " entries (" + notes.join("; ") + ")";
 		}, function (msg) {
 			document.getElementById("results").textContent += "\nLIVE timeline FAILED: " + msg;
 		});

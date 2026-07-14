@@ -22,7 +22,7 @@
 	var RM_TTL_MS = 30 * 60 * 1000;
 	var ORDER_CACHE_KEY = "rs3qh-order-v1";
 	var ORDER_TTL_MS = 7 * 24 * 3600 * 1000;
-	var TIMELINE_CACHE_KEY = "rs3qh-timeline-v1";
+	var TIMELINE_CACHE_KEY = "rs3qh-timeline-v2";
 	var TIMELINE_TTL_MS = 7 * 24 * 3600 * 1000;
 	var PREFS_KEY = "rs3qh-prefs-v1";
 
@@ -160,8 +160,10 @@
 	// Match quest titles across sources: RuneMetrics and the wiki write
 	// names slightly differently ("(miniquest)" suffixes, punctuation).
 	function normName(s) {
+		// Wiki page names carry disambiguators RuneMetrics doesn't use —
+		// "Tears of Guthix (quest)" vs "Tears of Guthix".
 		return s.toLowerCase()
-			.replace(/\(miniquest\)|\(saga\)/g, "")
+			.replace(/\((mini)?quest\)|\(saga\)|\(minigame\)/g, "")
 			.replace(/&/g, "and")
 			.replace(/[^a-z0-9]+/g, "");
 	}
@@ -339,7 +341,9 @@
 			cb(cached.rank);
 			return;
 		}
-		wikiGet({ action: "parse", page: "List_of_quests_by_timeline", prop: "text" }, function (data) {
+		// The combined page interleaves miniquests exactly like the in-game
+		// timeline; the quests-only page skips them and shifts the order.
+		wikiGet({ action: "parse", page: "List_of_quests_and_miniquests_by_timeline", prop: "text" }, function (data) {
 			if (!data.parse || !data.parse.text) {
 				errcb("Could not load the timeline quest list.");
 				return;
