@@ -503,6 +503,9 @@ main {
 	padding: 5px 9px;
 }
 
+/* Pin settings + reset to the footer's bottom-right corner. */
+#btn-settings-guide { margin-left: auto; }
+
 .settings-row {
 	display: flex;
 	align-items: center;
