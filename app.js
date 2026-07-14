@@ -2416,17 +2416,24 @@
 			loadSortData();
 		});
 
-		var floorMode = document.getElementById("floor-mode");
-		floorMode.value = floorPref();
-		floorMode.addEventListener("change", function () {
-			prefs.floors = floorMode.value;
+		// Floor convention pickers live in both views; keep them in step.
+		function setFloorConvention(v) {
+			prefs.floors = v;
 			store(PREFS_KEY, prefs);
+			["floor-mode", "floor-mode-guide"].forEach(function (id) {
+				document.getElementById(id).value = v;
+			});
 			// Cached guides were parsed with the old wording — drop them so
 			// the next open re-parses, and re-open the current one live.
 			try { localStorage.removeItem(GUIDE_CACHE_KEY); } catch (e) { /* ignore */ }
 			if (currentQuestTitle && !document.getElementById("view-guide").classList.contains("hidden")) {
 				openQuest(currentQuestTitle);
 			}
+		}
+		["floor-mode", "floor-mode-guide"].forEach(function (id) {
+			var sel = document.getElementById(id);
+			sel.value = floorPref();
+			sel.addEventListener("change", function () { setFloorConvention(sel.value); });
 		});
 
 		document.getElementById("btn-next").addEventListener("click", function () {
