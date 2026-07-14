@@ -258,6 +258,20 @@
 		pc.getContext("2d").putImageData(card, 0, 0);
 		document.body.insertBefore(pc, document.getElementById("results"));
 
+		// Sub-step -> parent cascade: only when the sub-bullets plausibly ARE
+		// the step. A lone sub is a side note (item prep), and a parent with
+		// its own chat options still has its own conversation to do.
+		var casc = window.__rs3qh.subCascadeAllowed;
+		check("cascade: single sub never completes parent",
+			!casc({ text: "Talk to Mizgog.", chat: "1 Can I help you? / Accept", subs: [{ text: "Make a bowl of hot water." }] }));
+		check("cascade: single sub, no parent chat — still no cascade",
+			!casc({ text: "Do the thing.", subs: [{ text: "Prepare an item." }] }));
+		check("cascade: parent with chat never completes from subs",
+			!casc({ text: "Talk to X.", chat: "1 Hi.", subs: [{ text: "a" }, { text: "b" }] }));
+		check("cascade: multiple subs, no parent chat — cascade allowed",
+			casc({ text: "Do all of the following:", subs: [{ text: "a" }, { text: "b" }] }));
+		check("cascade: no subs — nothing to cascade", !casc({ text: "Plain step." }));
+
 		// Assist highlight sprite: rounded glowing pill, cached per size,
 		// pre-encoded for alt1.overLayImage.
 		var sp = window.__rs3qh.highlightSprite(280, 32);

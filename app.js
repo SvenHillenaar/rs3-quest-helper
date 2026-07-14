@@ -1676,18 +1676,27 @@
 		return !!questProgress().done[subKey(step, k)];
 	}
 
+	// Whether finishing all sub-steps may auto-complete the parent step.
+	function subCascadeAllowed(step) {
+		return (step.subs || []).length >= 2 && !step.chat;
+	}
+
 	function setSubDone(step, k, done) {
 		var p = questProgress();
 		if (done) p.done[subKey(step, k)] = true;
 		else delete p.done[subKey(step, k)];
-		// Completing every sub-step completes the step itself; un-ticking a
-		// sub re-opens a step that had been completed.
+		// Completing every sub-step completes the step itself — but only
+		// when the sub-steps plausibly ARE the whole step. A single
+		// sub-bullet is usually a side note (item preparation etc.), and a
+		// parent with its own chat options still has its own conversation
+		// to do, so neither cascades upward. Un-ticking a sub always
+		// re-opens a step that had been completed.
 		var subs = step.subs || [];
 		var allDone = subs.length > 0;
 		for (var i = 0; i < subs.length; i++) {
 			if (!isSubDone(step, i)) { allDone = false; break; }
 		}
-		if (allDone) p.done[stepKey(step)] = true;
+		if (allDone && subCascadeAllowed(step)) p.done[stepKey(step)] = true;
 		else if (!done) delete p.done[stepKey(step)];
 		store(PROGRESS_KEY, progress);
 		renderSteps();
@@ -2400,6 +2409,7 @@
 		locationLockNote: locationLockNote,
 		fetchRuneMetrics: fetchRuneMetrics,
 		highlightSprite: highlightSprite,
+		subCascadeAllowed: subCascadeAllowed,
 		setAuto: function (v) { autoAdvance = v; }
 	};
 
