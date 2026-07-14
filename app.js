@@ -2306,19 +2306,27 @@
 			freeHideTimer = setTimeout(function () { show("free-pos", false); }, 1200);
 		});
 
+		function openFreePanel(open) {
+			if (open && freeHideTimer) { clearTimeout(freeHideTimer); freeHideTimer = null; }
+			show("free-pos", open);
+		}
+
 		overlayPos.value = prefs.overlayPos || "tc";
-		show("free-pos", overlayPos.value === "free");
+		// On startup a saved free position is already in effect — keep the
+		// placement box closed. Only auto-open it when "free" is selected
+		// but no spot was ever picked (first use).
+		openFreePanel(overlayPos.value === "free" && prefs.overlayFreeX === undefined);
 		refreshFreeDot();
 		overlayPos.addEventListener("change", function () {
 			prefs.overlayPos = overlayPos.value;
 			store(PREFS_KEY, prefs);
-			show("free-pos", overlayPos.value === "free");
+			openFreePanel(overlayPos.value === "free");
 			if (overlayTimer) paintOverlay();
 		});
 		// Re-open the placement box by clicking the dropdown while "Free…"
 		// is already selected.
 		overlayPos.addEventListener("click", function () {
-			if (overlayPos.value === "free") show("free-pos", true);
+			if (overlayPos.value === "free") openFreePanel(true);
 		});
 
 		if (inAlt1()) {
