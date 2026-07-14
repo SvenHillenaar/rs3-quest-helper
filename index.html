@@ -55,7 +55,10 @@
 			</div>
 		</header>
 		<section class="quest-meta">
-			<div id="quest-info"></div>
+			<div class="meta-top">
+				<div id="quest-info"></div>
+				<button id="btn-overview" class="overview-toggle" title="Collapse or expand the whole overview at once">Collapse overview</button>
+			</div>
 			<details id="items-panel" class="hidden" open>
 				<summary>Items needed</summary>
 				<ul id="items-list"></ul>
@@ -64,12 +67,14 @@
 					<button id="btn-scan" title="Look for each item's icon on the game screen (open your backpack first)">Scan backpack</button>
 					<span id="scan-status"></span>
 				</div>
-				<div id="details-req" class="details-req hidden">
-					<div id="details-items-head" class="req-head">From the quest page</div>
-					<ul id="details-items"></ul>
-					<div id="details-rec-head" class="req-head">Recommended</div>
-					<ul id="details-rec"></ul>
-				</div>
+			</details>
+			<details id="details-items-panel" class="details-block hidden" open>
+				<summary>From the quest page</summary>
+				<ul id="details-items"></ul>
+			</details>
+			<details id="details-rec-panel" class="details-block hidden" open>
+				<summary>Recommended</summary>
+				<ul id="details-rec"></ul>
 			</details>
 		</section>
 		<div id="guide-status" class="status hidden"></div>

@@ -262,6 +262,21 @@
 		check("best match: exact text beats token overlap",
 			window.__rs3qh.matchOptions("2 Can you go away?", goblinOpts, 0)[0] === goblinOpts[1]);
 
+		// <gallery> images (Heart of Stone) become step images instead of
+		// leaking "file.png|caption" text into the step.
+		var gGal = window.__rs3qh.parseQuickGuide(
+			"==S==\n{{Checklist|\n* Talk to Kipple and note the location he tells you. {{Chat option|1 Yes.}}\n}}\n" +
+			"<gallery mode=\"packed\" heights=\"250\">\nHeart of Stone - Wizards' Tower solution.png|Wizards' Tower solution\n</gallery>\n"
+		);
+		var galImgs = [];
+		gGal.sections[0].steps.forEach(function (s) { (s.images || []).forEach(function (im) { galImgs.push(im); }); });
+		check("gallery: image extracted", galImgs.length === 1 && galImgs[0].file === "Heart of Stone - Wizards' Tower solution.png");
+		check("gallery: caption kept", galImgs[0].caption === "Wizards' Tower solution");
+		check("gallery: no filename leaks into text/notes",
+			gGal.sections[0].steps.every(function (s) {
+				return (s.text + " " + (s.note || "")).indexOf(".png") === -1;
+			}));
+
 		// Timeline order: tables in document order, first-cell links ranked,
 		// header rows and duplicates skipped.
 		var tl = window.__rs3qh.parseTimelineOrder(

@@ -10,7 +10,7 @@
 
 	var WIKI_API = "https://runescape.wiki/api.php";
 	var INDEX_CACHE_KEY = "rs3qh-index-v1";
-	var GUIDE_CACHE_KEY = "rs3qh-guides-v7";
+	var GUIDE_CACHE_KEY = "rs3qh-guides-v8";
 	var PROGRESS_KEY = "rs3qh-progress-v2";
 	var INDEX_TTL_MS = 7 * 24 * 3600 * 1000;
 	var GUIDE_TTL_MS = 7 * 24 * 3600 * 1000;
@@ -480,6 +480,21 @@
 			.replace(/<ref[^>]*\/>/gi, "")
 			.replace(/<ref[^>]*>[\s\S]*?<\/ref>/gi, "")
 			.replace(/<br\s*\/?>/gi, " ")
+			// <gallery> blocks list one image per line ("Name.png|caption")
+			// with no [[File:]] brackets; convert each line to an image
+			// sentinel BEFORE the generic tag strip removes the wrapper and
+			// leaks the file names into the step text.
+			.replace(/<gallery[^>]*>([\s\S]*?)<\/gallery>/gi, function (_, inner) {
+				return inner.split("\n").map(function (line) {
+					line = line.trim();
+					if (!line) return "";
+					var sep = line.indexOf("|");
+					var name = (sep === -1 ? line : line.slice(0, sep)).replace(/^(File|Image):/i, "").trim();
+					if (!/\.(png|jpe?g|gif|webp)$/i.test(name)) return "";
+					var caption = sep === -1 ? "" : line.slice(sep + 1).trim();
+					return IMG_OPEN + name + "|" + caption + IMG_CLOSE;
+				}).join(" ");
+			})
 			.replace(/<[^>]+>/g, "")
 			.replace(/\[\[(?:File|Image):([^\[\]]*(?:\[\[[^\]]*\]\][^\[\]]*)*)\]\]/gi, function (_, inner) {
 				// Keep guide images (puzzle solutions etc.) as sentinels; the
@@ -2249,6 +2264,25 @@
 
 	// ---------- navigation ----------
 
+	// The overview = the three collapsible blocks above the steps. Each
+	// folds on its own via its summary; the button folds/unfolds them all.
+	var OVERVIEW_PANELS = ["items-panel", "details-items-panel", "details-rec-panel"];
+
+	function overviewButtonLabel() {
+		var anyOpen = OVERVIEW_PANELS.some(function (id) {
+			var p = document.getElementById(id);
+			return p.open && !p.classList.contains("hidden");
+		});
+		document.getElementById("btn-overview").textContent =
+			anyOpen ? "Collapse overview" : "Expand overview";
+		return anyOpen;
+	}
+
+	function resetOverview() {
+		OVERVIEW_PANELS.forEach(function (id) { document.getElementById(id).open = true; });
+		overviewButtonLabel();
+	}
+
 	function renderQuestDetails() {
 		var d = (guide && guide.details) || { items: [], recommended: [] };
 		var itemsUl = document.getElementById("details-items");
@@ -2262,10 +2296,10 @@
 			itemsUl.appendChild(li);
 		});
 		d.recommended.forEach(function (l) { recUl.appendChild(el("li", null, l)); });
-		show("details-items-head", d.items.length > 0);
-		show("details-rec-head", d.recommended.length > 0);
-		show("details-req", d.items.length > 0 || d.recommended.length > 0);
-		if (d.items.length || d.recommended.length) show("items-panel", true);
+		// Each wiki section is its own collapsible block, so a huge
+		// overview (Rat Catchers…) can be folded away piece by piece.
+		show("details-items-panel", d.items.length > 0);
+		show("details-rec-panel", d.recommended.length > 0);
 	}
 
 	function openQuest(title) {
@@ -2295,7 +2329,9 @@
 			setStatus("guide-status", flatSteps.length ? "" : "This guide has no parseable steps — use the wiki link above.");
 			renderMeta();
 			renderSteps();
-			show("details-req", false);
+			show("details-items-panel", false);
+			show("details-rec-panel", false);
+			resetOverview();
 			attachQuestDetails(renderQuestDetails);
 			if (overlayTimer) paintOverlay();
 		}, function (msg) {
@@ -2474,6 +2510,18 @@
 			prefs.theme = themeMode.value;
 			store(PREFS_KEY, prefs);
 			applyTheme();
+		});
+
+		document.getElementById("btn-overview").addEventListener("click", function () {
+			var anyOpen = overviewButtonLabel();
+			OVERVIEW_PANELS.forEach(function (id) {
+				document.getElementById(id).open = !anyOpen;
+			});
+			overviewButtonLabel();
+		});
+		// Folding a single section by its summary keeps the button honest.
+		OVERVIEW_PANELS.forEach(function (id) {
+			document.getElementById(id).addEventListener("toggle", overviewButtonLabel);
 		});
 
 		document.getElementById("btn-clear-cache").addEventListener("click", function () {
