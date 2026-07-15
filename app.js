@@ -790,27 +790,47 @@
 		return out;
 	}
 
-	var CAP_STOPWORDS = " the you your are and not for with into what that this will its from his her out back down over near then them into a an of to in on at is it as be by ";
+	var CAP_STOPWORDS = " the you your are and not for with into what that this will its from his her out back down over near then them into a an of to in on at is it as be by " +
+		"again there their where which while would could should about after before around through still every other these those being going doing have has had just than then here when who whom also onto upon very much some more most ";
 
-	// Which step in a section a captioned image belongs to, or -1 for none:
-	// the step sharing the most distinctive words with the caption, needing
-	// a solid overlap so descriptive captions don't get pinned to the wrong
-	// step (a weak match falls back to section-level display).
+	function capWords(s) {
+		return (s || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/)
+			.filter(function (t) { return t.length > 2 && CAP_STOPWORDS.indexOf(" " + t + " ") === -1; });
+	}
+
+	// Which step in a section a captioned image belongs to, or -1 for none.
+	// Normally needs two shared words so descriptive captions don't land on
+	// the wrong step. But a SINGLE shared word is trusted when it's specific
+	// to this quest — at least five letters and appearing in no more than
+	// three steps of the guide slice ("organ" in Rune Mysteries, which shows
+	// up in the play/press/take-key steps) — which reliably pins puzzle/UI
+	// screenshots whose captions are short (Rune Mysteries' "organ" shows up
+	// in four steps). A weak match returns -1 and the image falls back to
+	// section-level display.
 	function bestStepForCaption(caption, steps) {
-		function words(s) {
-			return (s || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/)
-				.filter(function (t) { return t.length > 2 && CAP_STOPWORDS.indexOf(" " + t + " ") === -1; });
-		}
-		var cw = words(caption);
-		if (cw.length < 2) return -1;
-		var bestIdx = -1, bestHits = 0;
-		steps.forEach(function (st, i) {
-			var sw = words(st.text);
-			var hits = 0;
-			cw.forEach(function (t) { if (sw.indexOf(t) !== -1) hits++; });
-			if (hits > bestHits) { bestHits = hits; bestIdx = i; }
+		var cw = capWords(caption);
+		if (!cw.length) return -1;
+		// How many steps each caption word appears in (whole guide slice).
+		var freq = {};
+		cw.forEach(function (t) { freq[t] = 0; });
+		var stepWords = steps.map(function (st) { return capWords(st.text); });
+		stepWords.forEach(function (sw) {
+			cw.forEach(function (t) { if (sw.indexOf(t) !== -1) freq[t]++; });
 		});
-		return bestHits >= 2 ? bestIdx : -1;
+		var bestIdx = -1, bestHits = 0, bestDistinct = false;
+		steps.forEach(function (st, i) {
+			var sw = stepWords[i];
+			var hits = 0, distinct = false;
+			cw.forEach(function (t) {
+				if (sw.indexOf(t) === -1) return;
+				hits++;
+				if (t.length >= 5 && freq[t] <= 4) distinct = true;
+			});
+			if (hits > bestHits) { bestHits = hits; bestIdx = i; bestDistinct = distinct; }
+		});
+		if (bestHits >= 2) return bestIdx;
+		if (bestHits === 1 && bestDistinct) return bestIdx;
+		return -1;
 	}
 
 	// ---------- Efficient Ironman Pathway (special guide) ----------

@@ -423,6 +423,26 @@
 		check("caption pin: strong match pins to step", bsc("The solution to the tile puzzle", capSteps) === 1);
 		check("caption pin: weak/one-word match -> section (-1)", bsc("A dramatic cutscene plays", capSteps) === -1);
 		check("caption pin: short caption -> section (-1)", bsc("Overview", capSteps) === -1);
+		// A single DISTINCTIVE word (long, in <=2 steps) pins — the Rune
+		// Mysteries organ interface image, caption shares only "organ".
+		var organSteps = [
+			{ text: "Play the organ at the southern end of the ground floor." },
+			{ text: "Press the organ keys in the following order." },
+			{ text: "Take the organ key." }
+		];
+		check("caption pin: single distinctive word pins (organ x3)", bsc("The organ interface", organSteps) >= 0);
+		// Real Rune Mysteries has "organ" in four steps — still pins.
+		var organ4 = organSteps.concat([{ text: "Head back to the organ and play any note." }]);
+		check("caption pin: distinctive word in four steps still pins", bsc("The organ interface", organ4) >= 0);
+		// A common SHORT single word (talk, 4 letters) must NOT pin.
+		var talkSteps = [{ text: "Talk to the wizard." }, { text: "Talk to the guard." }, { text: "Talk to the mage." }];
+		check("caption pin: common short word stays section", bsc("Talk about the weather", talkSteps) === -1);
+		// "organ" in >4 steps is no longer distinctive -> section.
+		var manyOrgan = organ4.concat([{ text: "Repair the organ bellows." }]);
+		check("caption pin: word in >4 steps not distinctive", bsc("The organ interface", manyOrgan) === -1);
+		// A common 5+ letter filler ("around") must never pin on its own.
+		check("caption pin: long filler word does not pin",
+			bsc("Look around carefully", [{ text: "Walk around the tower." }, { text: "Look around here." }]) === -1);
 
 		// Timeline order: tables in document order, first-cell links ranked,
 		// header rows and duplicates skipped.
