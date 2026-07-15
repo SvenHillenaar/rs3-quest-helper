@@ -2207,6 +2207,24 @@
 		return null;
 	}
 
+	function allStepsDone() {
+		return flatSteps.length > 0 && flatSteps.every(isDone);
+	}
+
+	// After a user completes the final step, give a brief heads-up and return
+	// to the quest list. Guarded so repeated clicks don't stack timers.
+	var finishingQuest = false;
+	function maybeFinishQuest() {
+		if (finishingQuest || !guide || !allStepsDone()) return;
+		finishingQuest = true;
+		setStatus("guide-status", "🎉 " + guide.name + " complete! Returning to the quest list…");
+		setTimeout(function () {
+			finishingQuest = false;
+			if (allStepsDone()) goHome();
+			else setStatus("guide-status", "");
+		}, 1800);
+	}
+
 	function setDone(step, done) {
 		var p = questProgress();
 		if (done) p.done[stepKey(step)] = true;
@@ -2568,7 +2586,11 @@
 				}
 				row.appendChild(body);
 
-				row.addEventListener("click", function () { setDone(step, !isDone(step)); });
+				row.addEventListener("click", function () {
+						var wasDone = isDone(step);
+						setDone(step, !wasDone);
+						if (!wasDone) maybeFinishQuest();
+					});
 				main.appendChild(row);
 			});
 		});
@@ -2642,6 +2664,7 @@
 	function openQuest(title) {
 		currentQuestTitle = title;
 		lastScrolledKey = null;
+		finishingQuest = false;
 		show("view-home", false);
 		show("view-guide", true);
 		document.getElementById("guide-title").textContent = guideDisplayName(title);
@@ -2937,7 +2960,7 @@
 		function advanceStep() {
 			if (!guide || document.getElementById("view-guide").classList.contains("hidden")) return;
 			var cur = currentStep();
-			if (cur) setDone(cur, true);
+			if (cur) { setDone(cur, true); maybeFinishQuest(); }
 		}
 
 		document.getElementById("btn-next").addEventListener("click", advanceStep);
