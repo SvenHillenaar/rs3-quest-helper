@@ -301,6 +301,14 @@
 		mrg(t2, dec(enc(prog)));
 		check("progress: encode->decode->merge restores", t2["Cook's Assistant/Quick guide"].done["0:0"] === true);
 
+		// Questing modes restored from saved prefs (Assist/Auto/Overlay
+		// persist across restarts; Auto implies Assist).
+		var qmr = window.__rs3qh.questingModesToRestore;
+		check("modes: nothing saved -> nothing on", !qmr({}, false).overlay && !qmr({}, false).assist);
+		check("modes: assist+overlay remembered", qmr({ assistOn: true, overlayOn: true }, false).assist === true && qmr({ assistOn: true, overlayOn: true }, false).overlay === true);
+		check("modes: auto implies assist even if assist flag missing", qmr({}, true).assist === true);
+		check("modes: overlay alone doesn't turn on assist", qmr({ overlayOn: true }, false).assist === false);
+
 		// Keybind tokens: single letters case-fold, named keys stay verbatim,
 		// labels are human-readable.
 		var nk = window.__rs3qh.normKeybind, kl = window.__rs3qh.keyLabel;

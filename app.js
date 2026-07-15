@@ -2754,10 +2754,31 @@
 			resetOverview();
 			attachQuestDetails(renderQuestDetails);
 			if (title !== PATHWAY_TITLE) attachFullGuideImages(guide.name, title);
+			restoreQuestingModes();
 			if (overlayTimer) paintOverlay();
 		}, function (msg) {
 			setStatus("guide-status", msg);
 		});
+	}
+
+	// Which questing modes the saved prefs say to turn back on. Auto implies
+	// Assist (Auto can't run without it). Pure, so it can be unit-tested.
+	function questingModesToRestore(prefsObj, autoOn) {
+		return {
+			overlay: !!(prefsObj && prefsObj.overlayOn),
+			assist: !!((prefsObj && prefsObj.assistOn) || autoOn)
+		};
+	}
+
+	// Re-apply the Overlay/Assist/Auto toggles the user last had on, once a
+	// guide is open. Silent — only turns things on when Alt1 actually
+	// supports them, so nothing pops errors on a normal browser. (Position
+	// and Auto are already persisted separately.)
+	function restoreQuestingModes() {
+		if (!inAlt1()) return;
+		var want = questingModesToRestore(prefs, autoAdvance);
+		if (want.overlay && alt1.permissionOverlay && !overlayTimer) setOverlay(true);
+		if (want.assist && assistAvailable() && !assistTimer) setAssist(true);
 	}
 
 	// Fetch the full walkthrough's images and merge them into the open
@@ -3149,6 +3170,10 @@
 				return;
 			}
 			setOverlay(!overlayTimer);
+			// Remember the choice so it comes back next session (only saved on
+			// a deliberate click, not when goHome turns it off on exit).
+			prefs.overlayOn = !!overlayTimer;
+			store(PREFS_KEY, prefs);
 		});
 
 		document.getElementById("btn-assist").addEventListener("click", function () {
@@ -3161,6 +3186,10 @@
 				return;
 			}
 			setAssist(!assistTimer);
+			prefs.assistOn = !!assistTimer;
+			store(PREFS_KEY, prefs);
+			// Turning Assist off also stops Auto (it depends on Assist).
+			if (!assistTimer && autoAdvance) { autoAdvance = false; store(AUTO_KEY, false); refreshAutoBtn(); }
 		});
 
 		var autoBtn = document.getElementById("btn-auto");
@@ -3303,6 +3332,7 @@
 		encodeProgress: encodeProgress,
 		decodeProgress: decodeProgress,
 		mergeProgress: mergeProgress,
+		questingModesToRestore: questingModesToRestore,
 		assistTargets: assistTargets,
 		autoTickBlockedBySubs: autoTickBlockedBySubs,
 		normName: normName,
