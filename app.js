@@ -1284,15 +1284,18 @@
 		return picked;
 	}
 
-	// Alt1's readers only match the interface pixel-for-pixel at 100% scale.
-	// The chatbox is always on screen, so when it has never been recognised
-	// and no dialogue has either, the interface is almost certainly scaled —
-	// say so instead of failing silently. Pure so it can be tested.
+	// Alt1's readers only match the interface pixel-for-pixel. When neither
+	// the chatbox nor any dialogue has been recognised for a while, say so
+	// instead of failing silently — but don't overclaim: on standard setups
+	// the usual culprit is a fully transparent chat window, and dialogue
+	// highlighting can still work even when the chatbox is unreadable
+	// (Reddit report: 1080p, 100% scale, warning blamed the scale).
 	function scaleHintText(chatMisses, anyChatFound, anyDialogFound) {
 		if (anyChatFound || anyDialogFound || chatMisses < 8) return "";
-		return " ⚠ Nothing on screen is being recognised — if your in-game interface " +
-			"scale isn't 100% (graphics settings), Alt1 apps can't read the interface. " +
-			"The guide and overlay still work at any scale.";
+		return " ⚠ Alt1 hasn't recognised your chatbox yet. Common causes: a fully " +
+			"transparent chat window (give it an opaque background), or interface " +
+			"scale not at 100% (graphics settings). Dialogue highlighting may still " +
+			"work when a conversation opens — the guide and overlay always work.";
 	}
 
 	var chatScanMisses = 0;
@@ -2699,9 +2702,25 @@
 			location.reload();
 		});
 
-		document.getElementById("btn-next").addEventListener("click", function () {
+		function advanceStep() {
+			if (!guide || document.getElementById("view-guide").classList.contains("hidden")) return;
 			var cur = currentStep();
 			if (cur) setDone(cur, true);
+		}
+
+		document.getElementById("btn-next").addEventListener("click", advanceStep);
+		// "Done, next" from inside the game: Alt1's main hotkey (Alt+1 by
+		// default, configurable in Alt1's settings) advances the step, so
+		// the overlay alone is enough to quest by (Reddit request).
+		if (inAlt1() && typeof A1lib.on === "function") {
+			A1lib.on("alt1pressed", advanceStep);
+		}
+		// And a plain key for when the app window itself has focus.
+		window.addEventListener("keydown", function (e) {
+			if (e.key !== "n" && e.key !== "N") return;
+			var tag = ((e.target && e.target.tagName) || "").toLowerCase();
+			if (tag === "input" || tag === "textarea" || tag === "select") return;
+			advanceStep();
 		});
 
 		document.getElementById("btn-back").addEventListener("click", function () {
