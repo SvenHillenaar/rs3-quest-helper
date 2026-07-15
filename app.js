@@ -1082,7 +1082,7 @@
 	// but its options never matched — do not tick), { partial, required }
 	// (one of several required conversations done), or the evidence
 	// target { key, subIndex } to tick.
-	function convoObserve(key, dialogVisible, matchedTarget, candCount) {
+	function convoObserve(key, dialogVisible, matchedTarget, required) {
 		if (convo.key !== key) {
 			convo.key = key;
 			convo.seen = 0;
@@ -1096,9 +1096,9 @@
 			convo.gone = 0;
 			if (matchedTarget) {
 				convo.evidence = matchedTarget;
-				if (candCount && (matchedTarget.subIndex === null || matchedTarget.subIndex === undefined) &&
-					candCount > convo.required) {
-					convo.required = candCount;
+				if (required && (matchedTarget.subIndex === null || matchedTarget.subIndex === undefined) &&
+					required > convo.required) {
+					convo.required = required;
 				}
 			}
 			return null;
@@ -1172,6 +1172,31 @@
 			if (bestOptionFor(cand, opts)) n++;
 		});
 		return n;
+	}
+
+	// How many SEPARATE conversations a step needs before auto-tick, decided
+	// from the guide text alone. Almost always 1: a single conversation walks
+	// through as many option-screens as it likes (Rune Mysteries' Ellaron:
+	// "2 .../3 .../3 .../3 .../2 ..." is five picks in ONE talk). The only
+	// exception is a step that enumerates every option of ONE screen and
+	// wants each tried in its own conversation — Soul Searching's
+	// "1 Convince / 2 Persuade. / 3 Threaten." Those candidates are numbered
+	// exactly 1..N with no repeats, which is the signature we key on;
+	// repeated or offset numbers mean sequential screens of one conversation.
+	function requiredConversations(chatField) {
+		var nums = [];
+		chatField.split(" / ").forEach(function (cand) {
+			cand = cand.trim();
+			if (!cand || /^any$/i.test(cand)) return;
+			var m = /^(\d)[.)]?/.exec(cand);
+			nums.push(m ? +m[1] : 0);
+		});
+		if (nums.length < 2) return 1;
+		var sorted = nums.slice().sort(function (a, b) { return a - b; });
+		for (var i = 0; i < sorted.length; i++) {
+			if (sorted[i] !== i + 1) return 1; // not a full 1..N enumeration
+		}
+		return nums.length;
 	}
 
 	function assistAvailable() {
@@ -1526,12 +1551,12 @@
 			// Sampled every 2nd tick so convoObserve's seen/gone tick
 			// thresholds keep their original 700ms-cadence timing.
 			if (autoAdvance && assistTickN % CONVO_EVERY === 0) {
-				var candCount = 0;
-				if (matchedTarget && matchedTarget.subIndex === null && dlg && dlg.opts) {
-					candCount = countMatchedCandidates(matchedTarget.chat, dlg.opts);
+				var reqConv = 1;
+				if (matchedTarget && matchedTarget.subIndex === null) {
+					reqConv = requiredConversations(matchedTarget.chat);
 				}
 				var res = convoObserve(stepKey(step), !!pos,
-					matchedTarget ? { key: stepKey(step), subIndex: matchedTarget.subIndex } : null, candCount);
+					matchedTarget ? { key: stepKey(step), subIndex: matchedTarget.subIndex } : null, reqConv);
 				if (res) {
 					clearAssistOverlay();
 					if (res.none) {
@@ -2895,6 +2920,7 @@
 		parseQuickGuide: parseQuickGuide,
 		convoObserve: convoObserve,
 		countMatchedCandidates: countMatchedCandidates,
+		requiredConversations: requiredConversations,
 		assistTargets: assistTargets,
 		normName: normName,
 		parseRmPayload: parseRmPayload,

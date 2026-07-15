@@ -149,8 +149,20 @@
 		res = co("s6", false, null);
 		check("convo: evidence does not leak across steps", !!res && res.none === true);
 
-		// SOUL SEARCHING PATTERN: three candidates match the same screen ->
-		// three evidenced conversations required before the step ticks.
+		// requiredConversations: needs multiple talks ONLY when a step
+		// enumerates one screen's options 1..N (Soul Searching). Sequential
+		// or repeated numbers are one conversation (Ellaron / Sedridor).
+		var rc = window.__rs3qh.requiredConversations;
+		check("reqconv: Soul Searching 1..3 -> 3", rc("1 Convince / 2 Persuade. / 3 Threaten.") === 3);
+		check("reqconv: Ellaron 2/3/3/3/2 -> 1 (one conversation)",
+			rc("2 How can I get into the old tower? / 3 You do know, though? / 3 You mean the rumour about Water Surge? / 3 What do you mean, the key lies in understanding Water Surge? / 2 It's such a pity you couldn't help me, Maybe I'll visit the library.") === 1);
+		check("reqconv: Sedridor 3/3/4 -> 1", rc("3 Ariane says the tower is in danger. / 3 What are you going to do? / 4 Goodbye.") === 1);
+		check("reqconv: single candidate -> 1", rc("1 Yes.") === 1);
+		check("reqconv: with Any -> 1", rc("1 Talk about the quest. / Any") === 1);
+		check("reqconv: offset numbers 2/3 -> 1", rc("2 Ask about X. / 3 Ask about Y.") === 1);
+
+		// SOUL SEARCHING PATTERN: three separate conversations required
+		// before the step ticks (required=3 from requiredConversations).
 		var ssOpts = [{ text: "Convince" }, { text: "Persuade." }, { text: "Threaten." }];
 		var cmc = window.__rs3qh.countMatchedCandidates("1 Convince / 2 Persuade. / 3 Threaten.", ssOpts);
 		check("multi: three candidates on one screen", cmc === 3);
@@ -170,6 +182,19 @@
 		// one conversation: only one candidate matches at a time.
 		res = convoCycle("m2", 1);
 		check("multi: single-match steps tick on first conversation", !!res && !res.partial && !res.none);
+
+		// ELLARON REGRESSION: a single long conversation walks several
+		// option-screens (one of them a topic menu that shows two guide
+		// options at once). With required computed from the guide text (=1),
+		// it must tick when that ONE conversation ends — not stay partial.
+		var ellChat = "2 How can I get into the old tower? / 3 You do know, though? / 3 You mean the rumour about Water Surge? / 3 What do you mean, the key lies in understanding Water Surge? / 2 It's such a pity you couldn't help me, Maybe I'll visit the library.";
+		var ellReq = rc(ellChat); // = 1
+		// dialog stays open across many screens (seen keeps rising),
+		// then the conversation ends (>=3 gone).
+		for (var s = 0; s < 8; s++) co("ell", true, ev("ell"), ellReq);
+		co("ell", false, null, ellReq); co("ell", false, null, ellReq);
+		res = co("ell", false, null, ellReq);
+		check("ellaron: one conversation ticks the step", !!res && !res.partial && !res.none && res.subIndex === null);
 
 		// Single-tick blip -> no end signal at all.
 		co("s7", true, ev("s7"));
