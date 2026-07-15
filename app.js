@@ -37,6 +37,7 @@
 	var optimalRank = null; // { normalised quest name: position in progression guide }
 	var timelineRank = null; // { normalised quest name: position in the timeline list }
 	var currentQuestTitle = null; // wiki title of the open guide, for reloads
+	var lastScrolledKey = null;   // step the list was last auto-scrolled to
 	var overlayTimer = null;
 
 	// ---------- storage ----------
@@ -1238,6 +1239,13 @@
 		if (optScreen.gone >= 3) optScreen.key = null;
 	}
 
+	// Whether auto-tick must hold off completing a step: only unticked
+	// sub-steps that have their OWN dialogue count. A chatless sub is an
+	// informational note and never blocks (it rides the setDone cascade).
+	function autoTickBlockedBySubs(step, subDone) {
+		return (step.subs || []).some(function (sub, k) { return sub.chat && !subDone(k); });
+	}
+
 	// Dialogue targets for a step, sub-steps FIRST: a conversation that
 	// matches a sub belongs to that sub. The parent's chat often ends in
 	// "Any", which would otherwise claim every conversation as parent
@@ -1392,28 +1400,33 @@
 			return (cur >= 1 && cur <= opts.length) ? [opts[cur - 1]] : [];
 		}
 
-		chatField.split(" / ").forEach(function (cand) {
-			cand = cand.trim();
-			if (/^any$/i.test(cand)) {
-				hasAny = true;
-				return;
+		// Candidates in a chain are picked in ORDER across screens. When two
+		// of them coincidentally sit on the SAME screen (Rune Mysteries'
+		// "2 We should keep our minds on the job. / 1 Yes, it's inspiring."
+		// both appear on screen one), only the EARLIEST unpicked one is the
+		// next to choose — highlighting both is wrong. So for a sequential
+		// chain we stop at the first matching candidate. A step that
+		// enumerates one screen's options 1..N (Soul Searching) is the
+		// exception: every option is a separate attempt, so show them all.
+		var enumerated = requiredConversations(chatField) > 1;
+		for (var ci = 0; ci < cands.length; ci++) {
+			var cand = cands[ci];
+			if (/^any$/i.test(cand)) { hasAny = true; continue; }
+			var opt = bestOptionFor(cand, opts);
+			if (!opt) {
+				// Number fallback only when the candidate is (near-)bare — a
+				// number with real text must match that text or stay silent.
+				var numMatch = /^(\d)[.)]?\s*(.*)$/.exec(cand);
+				if (numMatch && normOpt(numMatch[2]).length < 3) {
+					var num = +numMatch[1];
+					if (num >= 1 && num <= opts.length) opt = opts[num - 1];
+				}
 			}
-			// A candidate names ONE option — the best-scoring match, and
-			// only when its number (if any) agrees with the option's
-			// on-screen position (bestOptionFor).
-			var best = bestOptionFor(cand, opts);
-			if (best) {
-				add(best);
-				return;
+			if (opt) {
+				add(opt);
+				if (!enumerated) break; // sequential chain: only the next pick
 			}
-			// Number fallback only when the candidate is (near-)bare — a
-			// number with real text must match that text or stay silent.
-			var numMatch = /^(\d)[.)]?\s*(.*)$/.exec(cand);
-			if (numMatch && normOpt(numMatch[2]).length < 3) {
-				var num = +numMatch[1];
-				if (num >= 1 && num <= opts.length) add(opts[num - 1]);
-			}
-		});
+		}
 		// "Any" only means "every option works" when no specific candidate
 		// matched this screen (guides chain "1 Talk about X / Any").
 		if (!picked.length && hasAny) picked = opts.slice();
@@ -1679,11 +1692,14 @@
 						setSubDone(step, res.subIndex, true);
 						setAssistStatus("Assist: conversation finished — sub-step ticked automatically.");
 						return;
-					} else if ((step.subs || []).some(function (_, k) { return !isSubDone(step, k); })) {
-						// The parent's conversation is done, but its unticked
-						// sub-steps are separate tasks — completing the step
-						// would sweep them done unearned (setDone cascades).
-						setAssistStatus("Assist: conversation finished — but this step has unticked sub-steps, so it was not completed automatically.");
+					} else if (autoTickBlockedBySubs(step, function (k) { return isSubDone(step, k); })) {
+						// Hold only for unticked sub-steps that have their OWN
+						// dialogue (separate conversations still to do). A
+						// chatless sub is an informational note (Rune Mysteries'
+						// "the options you pick only dictate the title") — it
+						// shouldn't block completion, and setDone's cascade
+						// ticks it along with the step.
+						setAssistStatus("Assist: conversation finished — but this step has unticked dialogue sub-steps, so it was not completed automatically.");
 					} else {
 						setDone(step, true);
 						setAssistStatus("Assist: conversation finished — step ticked automatically.");
@@ -2559,9 +2575,23 @@
 
 		if (!cur && flatSteps.length) {
 			main.appendChild(el("div", "complete-banner", "Quest complete! " + guide.name + " is done."));
-		} else {
-			var active = main.querySelector(".step.current");
-			if (active && doneCount > 0) active.scrollIntoView({ block: "nearest" });
+			lastScrolledKey = null;
+		} else if (cur) {
+			// Scroll only when the current step actually changed (completing a
+			// step), not on every re-render (item toggles, scans). Top-align
+			// it with a little context above, so the current step and what
+			// follows are visible instead of the just-finished steps or a
+			// tall image landing mid-view.
+			var curKey = stepKey(cur);
+			if (curKey !== lastScrolledKey) {
+				lastScrolledKey = curKey;
+				var active = main.querySelector(".step.current");
+				if (active) {
+					var mTop = main.getBoundingClientRect().top;
+					var aTop = active.getBoundingClientRect().top;
+					main.scrollTop += (aTop - mTop) - 12;
+				}
+			}
 		}
 
 		var total = flatSteps.length || 1;
@@ -2611,6 +2641,7 @@
 
 	function openQuest(title) {
 		currentQuestTitle = title;
+		lastScrolledKey = null;
 		show("view-home", false);
 		show("view-guide", true);
 		document.getElementById("guide-title").textContent = guideDisplayName(title);
@@ -3152,6 +3183,7 @@
 		normKeybind: normKeybind,
 		keyLabel: keyLabel,
 		assistTargets: assistTargets,
+		autoTickBlockedBySubs: autoTickBlockedBySubs,
 		normName: normName,
 		parseRmPayload: parseRmPayload,
 		testOverlayCard: function () {

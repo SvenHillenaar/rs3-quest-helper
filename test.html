@@ -267,7 +267,7 @@
 		check("number chain: screen 3 -> option 4", mo("1 / 1 / 1 / 4", chainOpts, 3)[0] === chainOpts[3]);
 		check("number chain: extra screens clamp to last", mo("1 / 1 / 1 / 4", chainOpts, 9)[0] === chainOpts[3]);
 		check("number chain: out-of-range number -> no boxes", mo("1 / 6", [{ text: "A" }, { text: "B" }], 1).length === 0);
-		check("number chain: without index keeps old behaviour", mo("1 / 1 / 1 / 4", chainOpts).length === 2);
+		check("number chain: sequential chain shows only the next pick", mo("1 / 1 / 1 / 4", chainOpts).length === 1);
 		check("number chain: text candidates unaffected by index",
 			mo("1 Convince them. / 2 Persuade. / 3 Threaten.", [{ text: "Convince them." }, { text: "Persuade." }, { text: "Threaten." }], 0).length === 3);
 		check("number chain: never counts toward required conversations",
@@ -296,6 +296,18 @@
 		check("targets: chatless subs never targeted",
 			tgts.every(function (t) { return t.label !== "no chat sub"; }));
 
+		// Auto-tick blocks only on unticked sub-steps that have their own
+		// dialogue; a chatless informational note never blocks completion
+		// (Rune Mysteries rune-guardian step).
+		var atb = window.__rs3qh.autoTickBlockedBySubs;
+		var noneDone = function () { return false; };
+		check("autotick: chat sub blocks", atb({ subs: [{ text: "x", chat: "4 Yes." }] }, noneDone) === true);
+		check("autotick: chatless note does not block",
+			atb({ subs: [{ text: "The options you pick only dictate the title." }] }, noneDone) === false);
+		check("autotick: mixed, chat sub ticked -> not blocked",
+			atb({ subs: [{ text: "x", chat: "4 Yes." }, { text: "note" }] }, function (k) { return k === 0; }) === false);
+		check("autotick: no subs -> not blocked", atb({ text: "plain" }, noneDone) === false);
+
 		// "Every option matched" (the Any fallback) draws no boxes — words in
 		// the status line instead of a wall of green (Reddit report).
 		var aom = window.__rs3qh.allOptionsMatched;
@@ -305,6 +317,22 @@
 		check("any-fallback: single-option screens still box", aom([{ text: "only" }], [{ text: "only" }]) === false);
 		check("any-fallback: matcher still returns all for evidence",
 			window.__rs3qh.matchOptions("1 No such text here / Any", fourOpts, 0).length === 4);
+
+		// Sequential chain, two candidates on ONE screen: only the earliest
+		// (next-to-pick) is highlighted (Rune Mysteries Ariane: pick "We
+		// should keep our minds on the job" now, "Yes, it's inspiring" later).
+		var arOpts = [{ text: "Yes, it's inspiring." }, { text: "We should keep our minds on the job." }, { text: "Is there anything valuable we can loot?" }];
+		var arChat = "2 We should keep our minds on the job. / 1 Yes, it's inspiring. / 2 Okay, what should we do now?";
+		var ar = window.__rs3qh.matchOptions(arChat, arOpts, 0);
+		check("chain: only the next-to-pick option boxed", ar.length === 1 && ar[0] === arOpts[1]);
+		// The later screen (after picking) shows "Yes, it's inspiring" -> it
+		// becomes the earliest match and is highlighted then.
+		var arOpts2 = [{ text: "Yes, it's inspiring." }, { text: "Something else." }];
+		check("chain: later screen highlights the next candidate",
+			window.__rs3qh.matchOptions(arChat, arOpts2, 1)[0] === arOpts2[0]);
+		// Enumerated 1..N (Soul Searching) still highlights every option.
+		check("chain: enumerated step still shows all",
+			window.__rs3qh.matchOptions("1 Convince / 2 Persuade. / 3 Threaten.", [{ text: "Convince" }, { text: "Persuade." }, { text: "Threaten." }], 0).length === 3);
 
 		// Chain candidates carry their own screen's option number: a text
 		// match at a different position belongs to a later screen and stays
