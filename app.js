@@ -1425,7 +1425,11 @@
 		var numMatch = /^(\d)[.)]?\s*(.*)$/.exec(cand);
 		var num = numMatch ? +numMatch[1] : null;
 		var textPart = normOpt(numMatch ? numMatch[2] : cand);
-		if (textPart.length < 3) return null;
+		// No text at all → a bare option number, handled by the caller's
+		// position fallback. Short text ("9", a riddle answer) is kept:
+		// optTextScore still only matches it EXACTLY, so it lands on its own
+		// screen and stays silent elsewhere (never a stray position match).
+		if (!textPart.length) return null;
 		var best = null, bestScore = 0, bestIdx = -1;
 		opts.forEach(function (o, i) {
 			var s = optTextScore(textPart, normOpt(o.text || ""));
@@ -1473,10 +1477,15 @@
 			if (/^any$/i.test(cand)) { hasAny = true; continue; }
 			var opt = bestOptionFor(cand, opts);
 			if (!opt) {
-				// Number fallback only when the candidate is (near-)bare — a
-				// number with real text must match that text or stay silent.
+				// Position fallback ONLY for a candidate that is purely a
+				// number (no text). A number WITH text — even short text like
+				// "2 9." (the sphinx riddle answer in Icthlarin's Little
+				// Helper) — must match that text or stay silent, so it never
+				// boxes whatever happens to sit at that position on another
+				// screen (previously "I don't know, I don't want to risk my
+				// cat" got boxed instead of "Totally positive").
 				var numMatch = /^(\d)[.)]?\s*(.*)$/.exec(cand);
-				if (numMatch && normOpt(numMatch[2]).length < 3) {
+				if (numMatch && !normOpt(numMatch[2]).length) {
 					var num = +numMatch[1];
 					if (num >= 1 && num <= opts.length) opt = opts[num - 1];
 				}

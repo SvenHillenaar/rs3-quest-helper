@@ -354,6 +354,24 @@
 		check("any-fallback: matcher still returns all for evidence",
 			window.__rs3qh.matchOptions("1 No such text here / Any", fourOpts, 0).length === 4);
 
+		// Icthlarin's Little Helper sphinx: "1 I need help. / 1 Okay, that
+		// sounds fair. / 2 9. / 1 Totally positive." The numeric riddle-answer
+		// candidate "2 9." must NOT position-fallback onto option 2 on the
+		// final screen ("I don't know...") — only "Totally positive" is boxed.
+		var sphinxChat = "1 I need help. / 1 Okay, that sounds fair. / 2 9. / 1 Totally positive.";
+		var sphinxFinal = [{ text: "Totally positive." }, { text: "I don't know, I don't want to risk my cat." }];
+		var sf = window.__rs3qh.matchOptions(sphinxChat, sphinxFinal, 3);
+		check("sphinx: only Totally positive boxed on final screen", sf.length === 1 && sf[0] === sphinxFinal[0]);
+		// On the riddle screen the numeric answer 9 still gets boxed (exact,
+		// at its stated position 2).
+		var sphinxRiddle = [{ text: "8." }, { text: "9." }, { text: "10." }];
+		var sr = window.__rs3qh.matchOptions(sphinxChat, sphinxRiddle, 2);
+		check("sphinx: numeric answer 9 boxed on riddle screen", sr.length === 1 && sr[0] === sphinxRiddle[1]);
+		// A wrong-position numeric answer stays silent (9 sitting at slot 1,
+		// not the stated 2).
+		check("sphinx: numeric answer at wrong position stays silent",
+			window.__rs3qh.matchOptions("2 9.", [{ text: "9." }, { text: "8." }], 0).length === 0);
+
 		// Sequential chain, two candidates on ONE screen: only the earliest
 		// (next-to-pick) is highlighted (Rune Mysteries Ariane: pick "We
 		// should keep our minds on the job" now, "Yes, it's inspiring" later).
