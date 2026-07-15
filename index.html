@@ -96,7 +96,7 @@
 		<div id="assist-status" class="assist-status hidden"></div>
 		<footer>
 			<button id="btn-back" title="Un-complete the previous step">&#9664; Back</button>
-			<button id="btn-next" class="primary" title="Complete the current step">Done, next &#9654;</button>
+			<button id="btn-next" class="primary" title="Complete the current step. While playing (game focused), press Alt1's app hotkey — Alt+1 by default — to do this without clicking.">Done, next &#9654;</button>
 			<button id="btn-assist" title="Highlight matching dialogue options in game and watch the chatbox">Assist: off</button>
 			<button id="btn-auto" title="Automatically tick dialogue steps when the conversation ends (needs Assist)">Auto: off</button>
 			<button id="btn-overlay" title="Show the current step on top of the game screen">Overlay: off</button>
@@ -134,10 +134,10 @@
 				</select>
 			</div>
 			<div class="settings-row">
-				<label title="Key that completes the current step (Done, next) while the app window has focus">&ldquo;Done, next&rdquo; key</label>
+				<label title="Key that completes the current step while the APP window is focused (not while playing)">&ldquo;Done, next&rdquo; key (app focused)</label>
 				<button id="btn-keybind" title="Click, then press the key you want">N</button>
 			</div>
-			<div class="settings-note">This key works when the quest-helper window is focused. To advance the step from inside the game, use Alt1&rsquo;s app hotkey (Alt+1 by default) &mdash; change that in Alt1&rsquo;s own settings.</div>
+			<div class="settings-note"><strong>While playing the game, press Alt+1</strong> (Alt1&rsquo;s app hotkey) to complete a step without clicking &mdash; that is the only key that works when the game window is focused, and you change it in Alt1&rsquo;s own settings. The key above is a convenience for when this app&rsquo;s own window is focused, since a web app can&rsquo;t read your keyboard while the game is in front.</div>
 			<div class="settings-row">
 				<label title="Quest list, guides and sort orders are cached for 7 days">Wiki data cache</label>
 				<button id="btn-clear-cache">Clear &amp; reload</button>

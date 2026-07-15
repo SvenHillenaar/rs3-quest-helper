@@ -1119,6 +1119,19 @@
 		} catch (e) { /* ignore */ }
 	}
 
+	// Brief on-screen confirmation (its own overlay group so it never
+	// disturbs the step card) — used to show the Alt1 hotkey registered.
+	function flashOverlayText(msg) {
+		if (!inAlt1() || !alt1.permissionOverlay) return;
+		try {
+			alt1.overLaySetGroup("rs3qh-flash");
+			alt1.overLayClearGroup("rs3qh-flash");
+			alt1.overLayTextEx(msg, mixColor(141, 255, 90), 18,
+				Math.round(alt1.rsWidth / 2), 70, 1100, "", true, true);
+			alt1.overLayRefreshGroup("rs3qh-flash");
+		} catch (e) { /* overlay unavailable */ }
+	}
+
 	function setOverlay(on) {
 		var btn = document.getElementById("btn-overlay");
 		if (overlayTimer) { clearInterval(overlayTimer); overlayTimer = null; }
@@ -2957,18 +2970,26 @@
 			location.reload();
 		});
 
-		function advanceStep() {
+		function advanceStep(fromHotkey) {
 			if (!guide || document.getElementById("view-guide").classList.contains("hidden")) return;
 			var cur = currentStep();
-			if (cur) { setDone(cur, true); maybeFinishQuest(); }
+			if (!cur) return;
+			setDone(cur, true);
+			// Pressed from inside the game (Alt1 hotkey): confirm on-screen so
+			// the player knows it registered without looking at the app.
+			if (fromHotkey) flashOverlayText(allStepsDone() ? "✓ Quest complete!" : "✓ Step done");
+			maybeFinishQuest();
 		}
 
-		document.getElementById("btn-next").addEventListener("click", advanceStep);
+		document.getElementById("btn-next").addEventListener("click", function () { advanceStep(false); });
 		// "Done, next" from inside the game: Alt1's main hotkey (Alt+1 by
 		// default, configurable in Alt1's settings) advances the step, so
-		// the overlay alone is enough to quest by (Reddit request).
+		// the overlay alone is enough to quest by — this is the ONLY key that
+		// works while the game window is focused (a web app can't capture
+		// keys otherwise). The configurable key below only works when the
+		// app window itself has focus.
 		if (inAlt1() && typeof A1lib.on === "function") {
-			A1lib.on("alt1pressed", advanceStep);
+			A1lib.on("alt1pressed", function () { advanceStep(true); });
 		}
 
 		// In-app "Done, next" key (configurable in Settings). Matches on
@@ -2998,7 +3019,7 @@
 			}
 			var tag = ((e.target && e.target.tagName) || "").toLowerCase();
 			if (tag === "input" || tag === "textarea" || tag === "select") return;
-			if (normKeybind(e.key) === (prefs.advanceKey || "n")) advanceStep();
+			if (normKeybind(e.key) === (prefs.advanceKey || "n")) advanceStep(false);
 		});
 
 		document.getElementById("btn-back").addEventListener("click", function () {
