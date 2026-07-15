@@ -345,6 +345,18 @@
 		check("best match: exact text beats token overlap",
 			window.__rs3qh.matchOptions("2 Can you go away?", goblinOpts, 0)[0] === goblinOpts[1]);
 
+		// <imagemap> nav maps (The Fremennik Trials): keep the map image,
+		// drop the coordinate rects — no filename/number leak into text.
+		var gMap = window.__rs3qh.parseQuickGuide(
+			"==S==\n<imagemap>\nFile:The Fremennik Trials map.png|centre\ndesc none\nrect 122 19 263 37 [[The Fremennik Isles]]\nrect 6 385 165 402 [[Brundt]]\n</imagemap>\n{{Checklist|\n* Talk to Brundt.\n}}\n"
+		);
+		var mapImgs = [];
+		gMap.sections[0].steps.forEach(function (s) { (s.images || []).forEach(function (im) { mapImgs.push(im); }); });
+		gMap.sections[0].images.forEach(function (im) { mapImgs.push(im); });
+		check("imagemap: map image extracted", mapImgs.some(function (im) { return im.file === "The Fremennik Trials map.png"; }));
+		check("imagemap: no filename/coords leak into text",
+			gMap.sections[0].steps.every(function (s) { return !/\.png|rect |\d\d\d/.test(s.text + " " + (s.note || "")); }));
+
 		// <gallery> images (Heart of Stone) become step images instead of
 		// leaking "file.png|caption" text into the step.
 		var gGal = window.__rs3qh.parseQuickGuide(

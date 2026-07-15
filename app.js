@@ -10,7 +10,7 @@
 
 	var WIKI_API = "https://runescape.wiki/api.php";
 	var INDEX_CACHE_KEY = "rs3qh-index-v1";
-	var GUIDE_CACHE_KEY = "rs3qh-guides-v9";
+	var GUIDE_CACHE_KEY = "rs3qh-guides-v10";
 	var PROGRESS_KEY = "rs3qh-progress-v2";
 	var INDEX_TTL_MS = 7 * 24 * 3600 * 1000;
 	var GUIDE_TTL_MS = 7 * 24 * 3600 * 1000;
@@ -509,6 +509,14 @@
 					var caption = sep === -1 ? "" : line.slice(sep + 1).trim();
 					return IMG_OPEN + name + "|" + caption + IMG_CLOSE;
 				}).join(" ");
+			})
+			// <imagemap> is a clickable navigation map (The Fremennik Trials):
+			// a "File:X.png" line plus coordinate "rect …" links. Keep the
+			// map image, drop the coordinate lines — otherwise the generic
+			// tag strip leaks the filename and numbers into the step text.
+			.replace(/<imagemap[^>]*>([\s\S]*?)<\/imagemap>/gi, function (_, inner) {
+				var m = /(?:File|Image):\s*([^|\n\]]+?\.(?:png|jpe?g|gif|webp))/i.exec(inner);
+				return m ? IMG_OPEN + m[1].trim() + "|" + IMG_CLOSE : "";
 			})
 			.replace(/<[^>]+>/g, "")
 			.replace(/\[\[(?:File|Image):([^\[\]]*(?:\[\[[^\]]*\]\][^\[\]]*)*)\]\]/gi, function (_, inner) {
