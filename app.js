@@ -1230,13 +1230,21 @@
 	// conversations — when several candidates match one screen at once,
 	// that many evidenced conversations are required before the step
 	// ticks.
-	var convo = { key: null, seen: 0, gone: 0, evidence: null, required: 1, completions: 0 };
+	// maxSeq/lastSeq/holds/seqAtHold gate multi-pick chains: a step whose
+	// chat lists several picks in ONE conversation ("2 .../2 .../Accept/3
+	// .../3 ...", Rune Memories) must not tick when the dialogue merely
+	// vanishes mid-chain — the quest-offer window (or a cutscene) hides the
+	// chatbox between picks and would otherwise read as a finished
+	// conversation. We only complete once the LAST expected pick has been
+	// seen; an earlier vanish is a pause, not an end.
+	var convo = { key: null, seen: 0, gone: 0, evidence: null, required: 1, completions: 0,
+		maxSeq: -1, lastSeq: -1, holds: 0, seqAtHold: -1 };
 
 	// Returns null (nothing to do), { none: true } (a conversation ended
 	// but its options never matched — do not tick), { partial, required }
 	// (one of several required conversations done), or the evidence
 	// target { key, subIndex } to tick.
-	function convoObserve(key, dialogVisible, matchedTarget, required) {
+	function convoObserve(key, dialogVisible, matchedTarget, required, seq) {
 		if (convo.key !== key) {
 			convo.key = key;
 			convo.seen = 0;
@@ -1244,6 +1252,10 @@
 			convo.evidence = null;
 			convo.required = 1;
 			convo.completions = 0;
+			convo.maxSeq = -1;
+			convo.lastSeq = -1;
+			convo.holds = 0;
+			convo.seqAtHold = -1;
 		}
 		if (dialogVisible) {
 			convo.seen++;
@@ -1254,15 +1266,42 @@
 					required > convo.required) {
 					convo.required = required;
 				}
+				// Track how far through a gated multi-pick chain we've got.
+				// Only a positively-matched pick (index >= 0) arms the gate, so
+				// an "Any" screen that matched no specific candidate never
+				// forces the step to wait for a pick it will never see.
+				if (seq && seq.index >= 0 && seq.last >= 0) {
+					convo.lastSeq = seq.last;
+					if (seq.index > convo.maxSeq) convo.maxSeq = seq.index;
+				}
 			}
 			return null;
 		}
 		if (convo.seen >= 2) {
 			convo.gone++;
 			if (convo.gone >= 3) {
+				var ev = convo.evidence;
+				// Sequence gate: for a gated parent chain that hasn't reached
+				// its LAST pick, a vanish is an interruption (quest-offer
+				// window, cutscene), not the end — hold without ticking so the
+				// resumed conversation can finish. Safety valve: if two holds
+				// pass with no further progress, the last pick simply isn't
+				// matching (OCR/text drift), so stop holding and complete
+				// rather than stall forever.
+				if (ev && ev.key === key &&
+					(ev.subIndex === null || ev.subIndex === undefined) &&
+					convo.lastSeq >= 0 && convo.maxSeq < convo.lastSeq) {
+					var stalled = convo.holds >= 1 && convo.maxSeq <= convo.seqAtHold;
+					if (!stalled) {
+						convo.holds++;
+						convo.seqAtHold = convo.maxSeq;
+						convo.seen = 0;
+						convo.gone = 0;
+						return { held: true, reached: convo.maxSeq + 1, total: convo.lastSeq + 1 };
+					}
+				}
 				convo.seen = 0;
 				convo.gone = 0;
-				var ev = convo.evidence;
 				convo.evidence = null;
 				if (!ev || ev.key !== key) return { none: true };
 				// Sub-steps are granular already — tick directly.
@@ -1499,6 +1538,56 @@
 		// matched this screen (guides chain "1 Talk about X / Any").
 		if (!picked.length && hasAny) picked = opts.slice();
 		return picked;
+	}
+
+	// A chain candidate that can actually land on an options screen: a
+	// numbered pick, or a multi-word text option. "Any" and lone action
+	// words ("Accept" — a quest-window button, not a chat option) can't, so
+	// they never define the end of the sequence.
+	function isMatchableCand(cand) {
+		cand = (cand || "").trim();
+		if (!cand || /^any$/i.test(cand)) return false;
+		if (/^\d/.test(cand)) return true;
+		return cand.split(/\s+/).length >= 2;
+	}
+
+	// Index of the LAST matchable candidate in a chain, or -1. Drives the
+	// auto-tick sequence gate: a step is only "finished" once this pick has
+	// been seen. Returns -1 for single-pick chains (nothing to gate).
+	function lastMatchableCand(chatField) {
+		var cands = chatField.split(" / ");
+		var last = -1;
+		for (var i = 0; i < cands.length; i++) {
+			if (isMatchableCand(cands[i])) last = i;
+		}
+		return last;
+	}
+
+	// Which chain candidate the current options screen satisfies (its index),
+	// or -1. Mirrors matchOptions' sequential picking precedence so the gate
+	// counts the same pick the highlight points at.
+	function matchedCandIndex(chatField, opts, screenIdx) {
+		var cands = chatField.split(" / ").map(function (c) { return c.trim(); });
+		if (screenIdx !== undefined && cands.length > 1 &&
+			cands.every(function (c) { return /^\d[.)]?$/.test(c); })) {
+			var pos = Math.min(screenIdx, cands.length - 1);
+			var cur = +cands[pos].charAt(0);
+			return (cur >= 1 && cur <= opts.length) ? pos : -1;
+		}
+		for (var ci = 0; ci < cands.length; ci++) {
+			var cand = cands[ci];
+			if (/^any$/i.test(cand)) continue;
+			var opt = bestOptionFor(cand, opts);
+			if (!opt) {
+				var nm = /^(\d)[.)]?\s*(.*)$/.exec(cand);
+				if (nm && !normOpt(nm[2]).length) {
+					var num = +nm[1];
+					if (num >= 1 && num <= opts.length) opt = opts[num - 1];
+				}
+			}
+			if (opt) return ci;
+		}
+		return -1;
 	}
 
 	// Alt1's readers only match the interface pixel-for-pixel. When neither
@@ -1744,14 +1833,30 @@
 			// thresholds keep their original 700ms-cadence timing.
 			if (autoAdvance && assistTickN % CONVO_EVERY === 0) {
 				var reqConv = 1;
+				var seq = null;
 				if (matchedTarget && matchedTarget.subIndex === null) {
 					reqConv = requiredConversations(matchedTarget.chat);
+					// Gate only single-conversation, multi-pick parent chains:
+					// require the LAST pick before ticking so a mid-chain
+					// vanish (Rune Memories' quest-offer window) can't finish
+					// the step early. Enumerated (multi-conversation) steps and
+					// single picks are left exactly as before.
+					if (reqConv === 1 && dlg && dlg.opts && dlg.opts.length) {
+						var lastCand = lastMatchableCand(matchedTarget.chat);
+						if (lastCand >= 1) {
+							seq = { index: matchedCandIndex(matchedTarget.chat, dlg.opts, scrIdx),
+								last: lastCand };
+						}
+					}
 				}
 				var res = convoObserve(stepKey(step), !!pos,
-					matchedTarget ? { key: stepKey(step), subIndex: matchedTarget.subIndex } : null, reqConv);
+					matchedTarget ? { key: stepKey(step), subIndex: matchedTarget.subIndex } : null, reqConv, seq);
 				if (res) {
 					clearAssistOverlay();
-					if (res.none) {
+					if (res.held) {
+						setAssistStatus("Assist: conversation paused mid-chain (" + res.reached + "/" +
+							res.total + " picks) — waiting for it to continue before ticking.");
+					} else if (res.none) {
 						setAssistStatus("Assist: a conversation ended, but this step's options never appeared — not ticked (tick manually if it was the right one).");
 					} else if (res.partial) {
 						setAssistStatus("Assist: conversation done — " + res.partial + "/" + res.required +
@@ -3336,6 +3441,8 @@
 		convoObserve: convoObserve,
 		countMatchedCandidates: countMatchedCandidates,
 		requiredConversations: requiredConversations,
+		lastMatchableCand: lastMatchableCand,
+		matchedCandIndex: matchedCandIndex,
 		normKeybind: normKeybind,
 		keyLabel: keyLabel,
 		encodeProgress: encodeProgress,

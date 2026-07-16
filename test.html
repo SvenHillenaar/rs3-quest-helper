@@ -208,6 +208,64 @@
 		co("s8", true, null);
 		check("convo: reappear resets gone", co("s8", false, null) === null && co("s8", false, null) === null);
 
+		// RUNE MEMORIES BUG: a step's chat lists several picks in ONE
+		// conversation ("2 .../2 .../Accept/3 .../3 ..."). Accepting the quest
+		// pops a window that hides the chatbox mid-chain. That vanish must NOT
+		// complete the step early — only the LAST pick does.
+		var lmc = window.__rs3qh.lastMatchableCand;
+		var mci = window.__rs3qh.matchedCandIndex;
+		var rmChat = "2 What do you need help with? / 2 I'd be happy to help. / Accept / 3 How can I get you out? / 3 Okay, what do you want me to do?";
+		check("seqgate: lastMatchableCand skips 'Accept', lands on final pick", lmc(rmChat) === 4);
+		// A single-pick chain lands on index 0; the tick loop only gates when
+		// the last pick is index >= 1 (i.e. two or more picks), so 0 = ungated.
+		check("seqgate: single-pick chain -> index 0 (ungated)", lmc("1 Yes.") === 0);
+		check("seqgate: no matchable candidate -> -1", lmc("Any") === -1);
+		check("seqgate: trailing 'Any' is not a pick", lmc("1 Talk about the quest. / Any") === 0);
+		check("seqgate: matchedCandIndex resolves the final screen",
+			mci(rmChat, [{ text: "I'll manage." }, { text: "Never mind." }, { text: "Okay, what do you want me to do?" }]) === 4);
+
+		function seqO(idx, last) { return { index: idx, last: last }; }
+		var rmLast = lmc(rmChat); // 4
+		// screens 0 and 1: pick option 2 twice
+		co("rm", true, ev("rm"), 1, seqO(0, rmLast));
+		co("rm", true, ev("rm"), 1, seqO(0, rmLast));
+		co("rm", true, ev("rm"), 1, seqO(1, rmLast));
+		// quest-offer window: chatbox hidden for several ticks
+		co("rm", false, null, 1, null); co("rm", false, null, 1, null);
+		res = co("rm", false, null, 1, null);
+		check("rm: mid-chain vanish holds instead of ticking", !!res && res.held === true);
+		check("rm: hold reports progress so far (2/5)", res.reached === 2 && res.total === 5);
+		// conversation resumes after Accept: pick option 3 twice
+		co("rm", true, ev("rm"), 1, seqO(3, rmLast));
+		co("rm", true, ev("rm"), 1, seqO(3, rmLast));
+		co("rm", true, ev("rm"), 1, seqO(4, rmLast));
+		co("rm", false, null, 1, null); co("rm", false, null, 1, null);
+		res = co("rm", false, null, 1, null);
+		check("rm: ticks only after the final pick is seen", !!res && !res.held && !res.none && !res.partial && res.subIndex === null);
+
+		// SAFETY VALVE: if the last pick never matches (OCR/text drift) the
+		// step must not stall forever — a hold with no further progress
+		// completes on the next end.
+		co("rmv", true, ev("rmv"), 1, seqO(0, 3));
+		co("rmv", true, ev("rmv"), 1, seqO(1, 3));
+		co("rmv", false, null, 1, null); co("rmv", false, null, 1, null);
+		res = co("rmv", false, null, 1, null);
+		check("valve: first mid-chain vanish holds", !!res && res.held === true);
+		co("rmv", true, ev("rmv"), 1, seqO(1, 3));
+		co("rmv", true, ev("rmv"), 1, seqO(1, 3));
+		co("rmv", false, null, 1, null); co("rmv", false, null, 1, null);
+		res = co("rmv", false, null, 1, null);
+		check("valve: second vanish with no progress completes", !!res && !res.held && res.subIndex === null);
+
+		// A GATED chain that runs straight through (no interruption) still
+		// ticks normally the first time it ends.
+		co("rms", true, ev("rms"), 1, seqO(0, 2));
+		co("rms", true, ev("rms"), 1, seqO(1, 2));
+		co("rms", true, ev("rms"), 1, seqO(2, 2));
+		co("rms", false, null, 1, null); co("rms", false, null, 1, null);
+		res = co("rms", false, null, 1, null);
+		check("seqgate: uninterrupted chain ticks on first end", !!res && !res.held && !res.none && res.subIndex === null);
+
 		// Quest-name normalisation (RuneMetrics <-> wiki title matching).
 		var nn = window.__rs3qh.normName;
 		check("norm: miniquest suffix", nn("Doric's Task I (miniquest)") === nn("Doric's Task I"));
