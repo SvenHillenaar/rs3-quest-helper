@@ -1031,8 +1031,33 @@
 		return (b << 0) | (g << 8) | (r << 16) | (a << 24);
 	}
 
+	// Pick a compact window of sub-steps for the overlay. Keep the next
+	// unfinished one visible, with one or two completed rows as context,
+	// instead of filling the card with a long checklist.
+	function overlaySubRows(subs, subDone, maxRows) {
+		subs = subs || [];
+		maxRows = maxRows || 4;
+		var next = -1;
+		for (var i = 0; i < subs.length; i++) {
+			if (!subDone(i)) { next = i; break; }
+		}
+		var start = 0;
+		if (subs.length > maxRows && next >= 0) {
+			start = Math.max(0, Math.min(next - 1, subs.length - maxRows));
+		}
+		var end = Math.min(subs.length, start + maxRows);
+		return {
+			rows: subs.slice(start, end).map(function (sub, i) {
+				var index = start + i;
+				return { text: sub.text || "", chat: sub.chat || null, done: !!subDone(index), current: index === next };
+			}),
+			before: start,
+			after: subs.length - end
+		};
+	}
+
 	// Render the overlay as a proper card on a canvas: dark rounded panel
-	// with wrapped step text, progress, chat options and a next-step hint.
+	// with wrapped step text, progress, sub-steps, chat options and items.
 	function renderOverlayCard(step, doneCount, total) {
 		var W = 440, PAD = 12, LH = 20, MAXH = 400;
 		var canvas = document.createElement("canvas");
@@ -1064,15 +1089,33 @@
 		// Autosize: the step text wraps fully instead of being cut off.
 		var stepLines = step ? wrap(step.text, "600 15px 'Segoe UI', sans-serif", 8) : ["Quest complete! 🎉"];
 		var chatLines = step && step.chat ? wrap("Chat: " + step.chat, "13px 'Segoe UI', sans-serif", 3) : [];
+		var subRows = step && step.subs && step.subs.length
+			? overlaySubRows(step.subs, function (k) { return isSubDone(step, k); }, 4)
+			: null;
+		var renderedSubs = subRows ? subRows.rows.map(function (row) {
+			var prefix = row.done ? "[x] " : (row.current ? "> " : "[ ] ");
+			var text = prefix + row.text + (row.chat ? " (Chat: " + row.chat + ")" : "");
+			return { lines: wrap(text, "12px 'Segoe UI', sans-serif", 1), done: row.done, current: row.current };
+		}) : [];
+		var hiddenSubs = subRows ? (subRows.before ? 1 : 0) + (subRows.after ? 1 : 0) : 0;
+		if (subRows) {
+			// Leave room for the checklist when a long parent step also has
+			// several sub-steps to display.
+			stepLines = wrap(step.text, "600 15px 'Segoe UI', sans-serif", 4);
+			if (step.chat) chatLines = wrap("Chat: " + step.chat, "13px 'Segoe UI', sans-serif", 2);
+		}
 		// Items needed for the current section, if the guide lists any.
 		var neededLines = [];
 		if (step && guide.sections && guide.sections[step.sectionIndex] && guide.sections[step.sectionIndex].needed.length) {
 			neededLines = wrap("Items: " + guide.sections[step.sectionIndex].needed.join("; "),
 				"12px 'Segoe UI', sans-serif", 2);
 		}
+		if (subRows && neededLines.length > 1) neededLines = neededLines.slice(0, 1);
 
 		var H = Math.min(MAXH,
-			PAD + 16 + 6 + stepLines.length * LH + chatLines.length * 18 + neededLines.length * 17 + PAD);
+			PAD + 16 + 6 + stepLines.length * LH + chatLines.length * 18 +
+			(renderedSubs.length ? 18 + renderedSubs.length * 17 + hiddenSubs * 17 : 0) +
+			neededLines.length * 17 + PAD);
 
 		// Panel
 		ctx.clearRect(0, 0, W, 220);
@@ -1108,6 +1151,31 @@
 		ctx.font = "13px 'Segoe UI', sans-serif";
 		ctx.fillStyle = "#7fb8f0";
 		chatLines.forEach(function (l) { y += 18; ctx.fillText(l, PAD, y); });
+
+		// Sub-step checklist: done rows fade back, while the next unfinished
+		// row is green. This updates immediately whenever a sub-step is ticked.
+		if (renderedSubs.length) {
+			y += 18;
+			ctx.font = "700 11px 'Segoe UI', sans-serif";
+			ctx.fillStyle = "#e7c15a";
+			ctx.fillText("SUB-STEPS", PAD, y);
+			ctx.font = "12px 'Segoe UI', sans-serif";
+			if (subRows.before) {
+				y += 17;
+				ctx.fillStyle = "#8f8874";
+				ctx.fillText("... " + subRows.before + " earlier sub-step" + (subRows.before === 1 ? "" : "s"), PAD, y);
+			}
+			renderedSubs.forEach(function (row) {
+				y += 17;
+				ctx.fillStyle = row.done ? "#8f8874" : (row.current ? "#9fd47f" : "#f2ecd8");
+				ctx.fillText(row.lines[0], PAD, y);
+			});
+			if (subRows.after) {
+				y += 17;
+				ctx.fillStyle = "#8f8874";
+				ctx.fillText("... " + subRows.after + " more sub-step" + (subRows.after === 1 ? "" : "s"), PAD, y);
+			}
+		}
 
 		// Items needed for this section
 		ctx.font = "12px 'Segoe UI', sans-serif";
@@ -3538,11 +3606,16 @@
 		autoTickBlockedBySubs: autoTickBlockedBySubs,
 		normName: normName,
 		parseRmPayload: parseRmPayload,
-		testOverlayCard: function () {
-			var gsave = guide, fsave = flatSteps;
-			guide = { name: "Test Quest" };
+		testOverlayCard: function (withSubs) {
+			var gsave = guide, fsave = flatSteps, testTitle = "__rs3qh_overlay_test__";
+			var savedProgress = progress[testTitle];
+			guide = { name: "Test Quest", title: testTitle, sections: [{ needed: [] }] };
 			flatSteps = [
-				{ text: "Talk to the very important test NPC in a place with quite a long description that should wrap onto several lines nicely.", chat: "1 Yes please. / Any" },
+				{ text: "Talk to the very important test NPC in a place with quite a long description that should wrap onto several lines nicely.", chat: "1 Yes please. / Any",
+					subs: withSubs ? [
+						{ text: "Collect the first test item." }, { text: "Talk to the test guard.", chat: "1 Hello." },
+						{ text: "Use the test lever." }
+					] : [] },
 				{ text: "Then do the next thing." }
 			];
 			var img;
@@ -3551,6 +3624,8 @@
 			} finally {
 				guide = gsave;
 				flatSteps = fsave;
+				if (savedProgress === undefined) delete progress[testTitle];
+				else progress[testTitle] = savedProgress;
 			}
 			return img;
 		},
@@ -3568,6 +3643,7 @@
 		setFloorPref: function (v) { prefs.floors = v; },
 		parseTimelineOrder: parseTimelineOrder,
 		fetchTimelineOrder: fetchTimelineOrder,
+		overlaySubRows: overlaySubRows,
 		highlightShapes: highlightShapes,
 		allOptionsMatched: allOptionsMatched,
 		measureOptionButton: measureOptionButton,

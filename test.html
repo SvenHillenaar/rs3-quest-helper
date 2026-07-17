@@ -685,12 +685,28 @@
 		);
 		check("shop rows: location lock attached", /constructed/.test(shopRows2[0].lock || ""));
 
+		// Overlay sub-steps keep the next incomplete task visible without
+		// trying to fit a long checklist into the game overlay.
+		var osr = window.__rs3qh.overlaySubRows;
+		var overlayRows = osr([
+			{ text: "First" }, { text: "Second" }, { text: "Third" },
+			{ text: "Fourth" }, { text: "Fifth" }
+		], function (k) { return k < 2; }, 3);
+		check("overlay subs: keeps context around next incomplete row",
+			overlayRows.before === 1 && overlayRows.after === 1 && overlayRows.rows.length === 3 &&
+			overlayRows.rows[0].done && overlayRows.rows[1].current && overlayRows.rows[1].text === "Third");
+		check("overlay subs: preserves optional chat guidance",
+			osr([{ text: "Talk", chat: "1 Hello." }], function () { return false; }, 4).rows[0].chat === "1 Hello.");
+
 		// Overlay card renders with content (non-empty pixels, sane size).
 		var card = window.__rs3qh.testOverlayCard();
+		var subCard = window.__rs3qh.testOverlayCard(true);
 		var painted = 0;
 		for (var ci = 3; ci < card.data.length; ci += 4) { if (card.data[ci] > 0) painted++; }
 		check("overlay card: sane size", card.width === 440 && card.height > 60 && card.height < 220);
 		check("overlay card: painted pixels", painted > card.width * card.height * 0.5);
+		check("overlay card: sub-steps expand the card within its height cap",
+			subCard.width === 440 && subCard.height > card.height && subCard.height < 400);
 		// Visual preview of the overlay card.
 		var pc = document.createElement("canvas");
 		pc.width = card.width; pc.height = card.height;
