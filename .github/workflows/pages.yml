@@ -1,0 +1,41 @@
+name: Deploy to GitHub Pages
+
+# The legacy branch-based Pages builder kept failing on the Kiddsh9331
+# mirror, leaving it serving stale files. Deploy that mirror via GitHub
+# Actions instead. The repo is plain static files, so we just upload the
+# root as-is. SvenHillenaar stays on its working legacy build — the deploy
+# job is skipped there via the owner guard below.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.repository_owner == 'Kiddsh9331'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
