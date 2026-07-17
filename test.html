@@ -331,6 +331,31 @@
 		check("number chain: never counts toward required conversations",
 			window.__rs3qh.countMatchedCandidates("1 / 1 / 1 / 4", chainOpts) === 0);
 
+		// Birthright of the Dwarves: Veldaban's conversation returns to its
+		// original menu after earlier picks. The next guide candidate must be
+		// selected instead of highlighting the opening "Hello" option again.
+		var veldabanChat = "1 Hello, Veldaban. / 1 So you're king - what now? / 3 So what are you going to do? / Accept / 2 Okay, bye.";
+		var veldabanMenu = [
+			{ text: "Hello, Veldaban." }, { text: "Something else." },
+			{ text: "So what are you going to do?" }, { text: "Leave." }
+		];
+		check("birthright: first Veldaban menu starts at opening candidate",
+			mo(veldabanChat, veldabanMenu, 0, 0).length === 1 && mo(veldabanChat, veldabanMenu, 0, 0)[0] === veldabanMenu[0]);
+		var oss = window.__rs3qh.optionScreenState;
+		var rom = window.__rs3qh.recordOptionMatch;
+		window.__rs3qh.resetOptionScreens();
+		var vs0 = oss("birthright", veldabanMenu, "parent");
+		rom("parent", window.__rs3qh.matchedCandIndex(veldabanChat, veldabanMenu, vs0.index, vs0.candidateStart));
+		var veldabanSecond = [{ text: "So you're king - what now?" }, { text: "Leave." }];
+		var vs1 = oss("birthright", veldabanSecond, "parent");
+		rom("parent", window.__rs3qh.matchedCandIndex(veldabanChat, veldabanSecond, vs1.index, vs1.candidateStart));
+		var vs2 = oss("birthright", veldabanMenu, "parent");
+		check("birthright: returned menu continues to the third candidate",
+			vs2.candidateStart === 2 && mo(veldabanChat, veldabanMenu, vs2.index, vs2.candidateStart).length === 1 &&
+			mo(veldabanChat, veldabanMenu, vs2.index, vs2.candidateStart)[0] === veldabanMenu[2]);
+		check("birthright: returned menu records the later candidate",
+			window.__rs3qh.matchedCandIndex(veldabanChat, veldabanMenu, vs2.index, vs2.candidateStart) === 2);
+
 		// Progress export/import (cross-browser sync): round-trips, unions on
 		// merge, never un-ticks, rejects junk.
 		var enc = window.__rs3qh.encodeProgress, dec = window.__rs3qh.decodeProgress, mrg = window.__rs3qh.mergeProgress;
@@ -775,10 +800,18 @@
 		var qd = window.__rs3qh.parseQuestDetails(
 			"{{Infobox Quest|name=X}}\n{{Quest details\n|start = Talk to [[Bob]]\n|items = \n* 3 [[cadava berries]]\n* [[Rope]] (obtainable during the quest from [[Ned]])\n|recommended = \n* [[Lumbridge lodestone]] activated\n|kills = None\n}}\nRest of page."
 		);
-		check("details: items extracted", qd.items.length === 2 && qd.items[0] === "3 cadava berries");
-		check("details: obtainable annotation kept", qd.items[1] === "Rope (obtainable during the quest from Ned)");
-		check("details: recommended extracted", qd.recommended.length === 1 && qd.recommended[0].indexOf("lodestone") !== -1);
+		check("details: items extracted", qd.items.length === 2 && qd.items[0].text === "3 cadava berries" && qd.items[0].depth === 0);
+		check("details: obtainable annotation kept", qd.items[1].text === "Rope (obtainable during the quest from Ned)");
+		check("details: recommended extracted", qd.recommended.length === 1 && qd.recommended[0].text.indexOf("lodestone") !== -1);
 		check("details: absent template -> empty", window.__rs3qh.parseQuestDetails("no template here").items.length === 0);
+		var nestedDetails = window.__rs3qh.parseQuestDetails(
+			"{{Quest details|items = \n* One of the following:\n** Item A\n** Item B\n* Totally different requirement\n* Next item\n}}"
+		);
+		check("details: nested alternatives retain their bullet depth",
+			nestedDetails.items.length === 5 && nestedDetails.items[0].depth === 0 &&
+			nestedDetails.items[1].text === "Item A" && nestedDetails.items[1].depth === 1 &&
+			nestedDetails.items[2].text === "Item B" && nestedDetails.items[2].depth === 1 &&
+			nestedDetails.items[3].depth === 0 && nestedDetails.items[4].depth === 0);
 
 		// Parser smoke test on a synthetic quick guide.
 		var g = window.__rs3qh.parseQuickGuide(

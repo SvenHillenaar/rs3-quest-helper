@@ -10,7 +10,8 @@
 
 	var WIKI_API = "https://runescape.wiki/api.php";
 	var INDEX_CACHE_KEY = "rs3qh-index-v1";
-	var GUIDE_CACHE_KEY = "rs3qh-guides-v10";
+	// v11: quest-detail list entries now retain their wiki nesting depth.
+	var GUIDE_CACHE_KEY = "rs3qh-guides-v11";
 	var PROGRESS_KEY = "rs3qh-progress-v2";
 	var INDEX_TTL_MS = 7 * 24 * 3600 * 1000;
 	var GUIDE_TTL_MS = 7 * 24 * 3600 * 1000;
@@ -993,7 +994,9 @@
 			var v = namedParam(parts, key);
 			if (!v || /^(none|no)\.?$/i.test(v.trim())) return [];
 			return cleanMarkup(resolveTemplates(v)).split("\n").map(function (l) {
-				return extractChat(l.replace(/^\s*[*#:]+\s*/, "")).text;
+				var marker = /^\s*([*#]+)\s*/.exec(l);
+				var text = extractChat(l.replace(/^\s*[*#:]+\s*/, "")).text;
+				return text ? { text: text, depth: marker ? marker[1].length - 1 : 0 } : null;
 			}).filter(Boolean);
 		}
 		return { items: listOf("items"), recommended: listOf("recommended") };
@@ -1321,12 +1324,22 @@
 	// advances when the visible options change while the dialogue stays
 	// open, resets when the conversation ends or the step changes. Drives
 	// stepping through bare-number chains like "1 / 1 / 1 / 4".
-	var optScreen = { key: null, sig: null, idx: 0, gone: 0 };
+	var optScreen = { key: null, sig: null, idx: 0, gone: 0, nextCand: {}, matchedCand: -1, matchedTarget: null };
 	function screenIndexFor(key, opts) {
 		var sig = opts.map(function (o) { return o.text || ""; }).join("|");
 		if (optScreen.key !== key) {
 			optScreen.key = key; optScreen.sig = sig; optScreen.idx = 0;
+			optScreen.nextCand = {}; optScreen.matchedCand = -1; optScreen.matchedTarget = null;
 		} else if (optScreen.sig !== sig) {
+			// A matched option on the previous screen was selected. Continue
+			// from the following guide candidate, even if this screen is a
+			// menu we already saw earlier in the conversation. Birthright of
+			// the Dwarves, for example, returns to Veldaban's first menu before
+			// its third pick; restarting at candidate 0 boxed "Hello" forever.
+			if (optScreen.matchedTarget && optScreen.matchedCand >= 0) {
+				optScreen.nextCand[optScreen.matchedTarget] = optScreen.matchedCand + 1;
+			}
+			optScreen.matchedCand = -1; optScreen.matchedTarget = null;
 			optScreen.sig = sig; optScreen.idx++;
 		}
 		optScreen.gone = 0;
@@ -1335,7 +1348,14 @@
 	function screenIndexGone() {
 		if (optScreen.key === null) return;
 		optScreen.gone++;
-		if (optScreen.gone >= 3) optScreen.key = null;
+		if (optScreen.gone >= 3) {
+			optScreen.key = null;
+			optScreen.sig = null;
+			optScreen.idx = 0;
+			optScreen.nextCand = {};
+			optScreen.matchedCand = -1;
+			optScreen.matchedTarget = null;
+		}
 	}
 
 	// Whether auto-tick must hold off completing a step: only unticked
@@ -1353,10 +1373,10 @@
 		var targets = [];
 		(step.subs || []).forEach(function (sub, k) {
 			if (sub.chat && !subDone(k)) {
-				targets.push({ chat: sub.chat, subIndex: k, label: sub.text });
+				targets.push({ chat: sub.chat, subIndex: k, label: sub.text, optionKey: "sub:" + k });
 			}
 		});
-		if (step.chat) targets.push({ chat: step.chat, subIndex: null, label: step.text });
+		if (step.chat) targets.push({ chat: step.chat, subIndex: null, label: step.text, optionKey: "parent" });
 		return targets;
 	}
 
@@ -1487,7 +1507,7 @@
 	// that does not match this screen must stay silent — falling back to
 	// its number would box the wrong option (numbers only count when the
 	// guide gives a number alone).
-	function matchOptions(chatField, opts, screenIdx) {
+	function matchOptions(chatField, opts, screenIdx, candidateStart) {
 		var picked = [];
 		var hasAny = false;
 		function add(o) { if (picked.indexOf(o) === -1) picked.push(o); }
@@ -1512,7 +1532,12 @@
 		// enumerates one screen's options 1..N (Soul Searching) is the
 		// exception: every option is a separate attempt, so show them all.
 		var enumerated = requiredConversations(chatField) > 1;
-		for (var ci = 0; ci < cands.length; ci++) {
+		// A sequential conversation can return to an earlier menu. Start at
+		// the first candidate not already selected on a previous menu, while
+		// leaving an explicit 1..N enumeration alone (those are separate
+		// conversations and must always show every choice).
+		var firstCand = enumerated ? 0 : Math.max(0, candidateStart || 0);
+		for (var ci = firstCand; ci < cands.length; ci++) {
 			var cand = cands[ci];
 			if (/^any$/i.test(cand)) { hasAny = true; continue; }
 			var opt = bestOptionFor(cand, opts);
@@ -1567,7 +1592,7 @@
 	// Which chain candidate the current options screen satisfies (its index),
 	// or -1. Mirrors matchOptions' sequential picking precedence so the gate
 	// counts the same pick the highlight points at.
-	function matchedCandIndex(chatField, opts, screenIdx) {
+	function matchedCandIndex(chatField, opts, screenIdx, candidateStart) {
 		var cands = chatField.split(" / ").map(function (c) { return c.trim(); });
 		if (screenIdx !== undefined && cands.length > 1 &&
 			cands.every(function (c) { return /^\d[.)]?$/.test(c); })) {
@@ -1575,7 +1600,9 @@
 			var cur = +cands[pos].charAt(0);
 			return (cur >= 1 && cur <= opts.length) ? pos : -1;
 		}
-		for (var ci = 0; ci < cands.length; ci++) {
+		var enumerated = requiredConversations(chatField) > 1;
+		var firstCand = enumerated ? 0 : Math.max(0, candidateStart || 0);
+		for (var ci = firstCand; ci < cands.length; ci++) {
 			var cand = cands[ci];
 			if (/^any$/i.test(cand)) continue;
 			var opt = bestOptionFor(cand, opts);
@@ -1819,12 +1846,17 @@
 				if (dlg && dlg.opts && dlg.opts.length) {
 					var scrIdx = screenIndexFor(stepKey(step), dlg.opts);
 					targets.forEach(function (t) {
-						var m = matchOptions(t.chat, dlg.opts, scrIdx);
+						var m = matchOptions(t.chat, dlg.opts, scrIdx, optScreen.nextCand[t.optionKey] || 0);
 						if (m.length && !matchedTarget) matchedTarget = t;
 						m.forEach(function (o) {
 							if (allMatches.indexOf(o) === -1) allMatches.push(o);
 						});
 					});
+					if (matchedTarget) {
+						optScreen.matchedCand = matchedCandIndex(matchedTarget.chat, dlg.opts, scrIdx,
+							optScreen.nextCand[matchedTarget.optionKey] || 0);
+						optScreen.matchedTarget = matchedTarget.optionKey;
+					}
 				}
 			}
 
@@ -1845,7 +1877,8 @@
 					if (reqConv === 1 && dlg && dlg.opts && dlg.opts.length) {
 						var lastCand = lastMatchableCand(matchedTarget.chat);
 						if (lastCand >= 1) {
-							seq = { index: matchedCandIndex(matchedTarget.chat, dlg.opts, scrIdx),
+							seq = { index: matchedCandIndex(matchedTarget.chat, dlg.opts, scrIdx,
+								optScreen.nextCand[matchedTarget.optionKey] || 0),
 								last: lastCand };
 						}
 					}
@@ -2862,13 +2895,24 @@
 		var recUl = document.getElementById("details-rec");
 		itemsUl.innerHTML = "";
 		recUl.innerHTML = "";
-		d.items.forEach(function (l) {
+		d.items.forEach(function (line) {
+			// v10 cached strings are still safe to render; v11 entries retain
+			// their source bullet depth so alternatives stay visually grouped.
+			var l = typeof line === "string" ? line : line.text;
+			var depth = typeof line === "string" ? 0 : (line.depth || 0);
 			var li = el("li", null, l);
+			if (depth) li.style.marginLeft = (depth * 16) + "px";
 			// Surface the key annotation the quick guide leaves out.
 			if (/obtain(ed|able)?\s+(during|in)\s+the\s+quest/i.test(l)) li.className = "obtainable";
 			itemsUl.appendChild(li);
 		});
-		d.recommended.forEach(function (l) { recUl.appendChild(el("li", null, l)); });
+		d.recommended.forEach(function (line) {
+			var l = typeof line === "string" ? line : line.text;
+			var depth = typeof line === "string" ? 0 : (line.depth || 0);
+			var li = el("li", null, l);
+			if (depth) li.style.marginLeft = (depth * 16) + "px";
+			recUl.appendChild(li);
+		});
 		// Each wiki section is its own collapsible block, so a huge
 		// overview (Rat Catchers…) can be folded away piece by piece.
 		show("details-items-panel", d.items.length > 0);
@@ -3529,6 +3573,18 @@
 		measureOptionButton: measureOptionButton,
 		scaleHintText: scaleHintText,
 		subCascadeAllowed: subCascadeAllowed,
+		// Stateful dialogue-screen helpers for regression tests.
+		optionScreenState: function (key, opts, optionKey) {
+			return { index: screenIndexFor(key, opts), candidateStart: optScreen.nextCand[optionKey] || 0 };
+		},
+		recordOptionMatch: function (optionKey, candidateIndex) {
+			optScreen.matchedTarget = optionKey;
+			optScreen.matchedCand = candidateIndex;
+		},
+		resetOptionScreens: function () {
+			optScreen.key = null; optScreen.sig = null; optScreen.idx = 0; optScreen.gone = 0;
+			optScreen.nextCand = {}; optScreen.matchedCand = -1; optScreen.matchedTarget = null;
+		},
 		setAuto: function (v) { autoAdvance = v; }
 	};
 
